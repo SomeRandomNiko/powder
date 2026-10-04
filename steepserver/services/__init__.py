@@ -15,6 +15,7 @@ from ..fixtures.http import HttpFixtures
 from ..fixtures.rmc import RmcFixtures
 from .accounts import AccountService
 from .economy import EconomyService
+from .entities import EntityService
 from .matchmaking import MatchmakingService
 from .seed import captured_session, seed_player
 from .stats import StatsService
@@ -60,6 +61,7 @@ class Services:
                                        self.default_player_id)
         self.economy = EconomyService(self.config, self.repos, self.assets.catalog, self.events)
         self.stats = StatsService(self.repos)
+        self.entities = EntityService(self.repos, self.assets.http)
         self.matchmaking = MatchmakingService()
 
     def default_player_id(self) -> str:
@@ -83,6 +85,8 @@ class Services:
         """Wipe a player and recreate them from the recorded data."""
         with self.db.transaction():
             self.repos.players.delete(profile_id)
+            self.repos.entities.clear(profile_id)
+            self.repos.kv.set(profile_id.lower(), "entities_seeded", False)
             self.seed(profile_id)
 
     @classmethod

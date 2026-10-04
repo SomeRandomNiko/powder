@@ -35,6 +35,47 @@ def test_catalogue_reproduces_every_recorded_offers_query(real):
         assert {o["offerId"] for o in got} == recorded, key
 
 
+def _session_timeline():
+    """Stat snapshots and stat uploads from recordings/sessions/*.jsonl (decrypted NEX captures)."""
+    from steepserver.services.stats import decode_stat_group
+    from steepserver.transport.nex.handlers.stats import decode_events
+    from steepserver.transport.nex.rmc_codec import Reader
+    timeline = []
+    for f in sorted((RECORDINGS / "sessions").glob("*.jsonl")):
+        for line in f.read_text(encoding="utf-8").splitlines():
+            m = json.loads(line)
+            method = (m.get("method") or "").rstrip("*")
+            body = bytes.fromhex(m.get("body") or "")
+            if method == "PlayerStats2Protocol::GetStatisticGroup_V1" and not m["is_request"] and m["success"]:
+                timeline.append((m["time"], "snapshot", decode_stat_group(body)[1]))
+            elif method.startswith("PlayerStats2Protocol::PostEvent") and m["is_request"]:
+                timeline.append((m["time"], "events", decode_events(Reader(body), method.endswith("PostEvent_V1"))))
+    return sorted(timeline, key=lambda x: x[0])
+
+
+@pytest.mark.skipif(not list((RECORDINGS / "sessions").glob("*.jsonl")), reason="no recorded sessions")
+def test_event_rules_reproduce_every_recorded_stat_change(tmp_path):
+    """Start from each recorded stat snapshot, apply the events the game uploaded until the next
+    snapshot, and require the result to equal that next snapshot exactly."""
+    timeline = _session_timeline()
+    snapshots = [i for i, t in enumerate(timeline) if t[1] == "snapshot"]
+    assert len(snapshots) >= 2
+    pid = "00000000-0000-4000-8000-0000000000aa"
+    s = Services.open(Config(server=ServerConfig(data_dir=tmp_path, recordings_dir=tmp_path / "none")))
+    s.repos.players.create(pid, pid, "replay")
+    for a, b in zip(snapshots, snapshots[1:]):
+        s.repos.stats.clear(pid)
+        for row in timeline[a][2]:
+            s.repos.stats.set(pid, "player_profile", row.key, row.type, row.value)
+        for _, kind, events in timeline[a + 1:b]:
+            s.stats.apply_events(pid, events)
+        got = {r.key: (r.type, r.value) for r in s.stats.group(pid, "player_profile")}
+        want = {r.key: (r.type, r.value) for r in timeline[b][2]}
+        diff = {k: (got.get(k), want.get(k)) for k in set(got) | set(want) if got.get(k) != want.get(k)}
+        assert not diff, f"snapshot {a} -> {b}: {diff}"
+    s.db.close()
+
+
 def test_recorded_player_seeds_and_stats_round_trip(real, tmp_path):
     s = Services.open(Config(server=ServerConfig(data_dir=tmp_path, recordings_dir=RECORDINGS)), real)
     pid = s.default_player_id()

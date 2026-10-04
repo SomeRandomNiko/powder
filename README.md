@@ -2,8 +2,21 @@
 
 One process that stands in for Ubisoft's online services: the UbiServices HTTPS API (all
 `*.ubi.com` hosts, port 443) and the Quazal NEX/RendezVous server (UDP 6005). It answers from
-recordings of real sessions, keeps per-player state (inventory, credits, stats) in SQLite, and
-is built to grow: several players, gameplay toggles, plugins, admin tools.
+recordings of real sessions, keeps per-player state in SQLite, and is built to grow: several
+players, gameplay toggles, plugins, admin tools.
+
+What persists per player: inventory and credits (store purchases, challenge rewards), progression
+(level and XP per sport, playtime, completed memorables, unlocked dropzones and challenges, from the
+game's stat uploads), personal best per challenge, and profile entities (rider card, favorites).
+
+## Progression
+
+The game computes its progress itself and uploads it as stat events
+(`PlayerStats2Protocol::PostEvents_V1`); `services/stats.py` maps each event to the stat it updates
+(`EVENT_RULES`). The rules were derived by diffing recorded stat snapshots against the events uploaded
+between them, and `tests/test_recordings.py` replays your recorded sessions to check they reproduce
+every recorded change exactly. They are monotonic (max / add / bitwise-or), so a stale upload can never
+lower a level or wipe an unlock. Every upload is also kept raw in `stat_events`.
 
 ## Run
 
@@ -23,7 +36,8 @@ Runtime files go to `data/` (`steep.db`, `logs/server.log`, `bodies/` = logs the
 ## Recordings (your data, never committed)
 
 `recordings/` holds replies recorded from your own online sessions: `fixtures.json` (HTTPS),
-`fixtures-rmc.json` (NEX), `inventory-updates.json`. They contain personal data (your account,
+`fixtures-rmc.json` (NEX), `inventory-updates.json`, and optionally `sessions/*.jsonl` (decrypted
+NEX sessions, used by `tests/test_recordings.py`). They contain personal data (your account,
 friends, other players on leaderboards), so the folder is gitignored and nothing in the repository
 may depend on it. Without recordings the server still runs; it simply has nothing to replay. The
 account the recordings belong to becomes the default player and is seeded from them on first run.
@@ -39,6 +53,9 @@ uv run steepserver admin grant credits 50000
 uv run steepserver admin stats --key level
 uv run steepserver admin ledger
 uv run steepserver admin offers armada          # search the store catalogue
+uv run steepserver admin events                 # recent progress uploads from the game
+uv run steepserver admin scores                 # personal best per challenge
+uv run steepserver admin entities               # rider card, favorites
 uv run steepserver admin reseed                 # back to the recorded state
 ```
 
@@ -66,7 +83,7 @@ steepserver/
   fixtures/           lookups over the recordings; catalog.py = store offers
   core/               identity (who logs in), sessions (tickets, live connections, server push), events
   db/                 SQLite, numbered migrations, repositories
-  services/           game logic: accounts, economy, stats, matchmaking, seed
+  services/           game logic: accounts, economy, stats (progression), entities, matchmaking, seed
   transport/https/    aiohttp app, UbiServices routes, notification WebSocket
   transport/nex/      PRUDP, secure channel, RMC codec, dispatcher, per-protocol handlers
   plugins/            plugin API + loader

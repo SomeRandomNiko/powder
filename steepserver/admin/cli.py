@@ -5,6 +5,9 @@
   steepserver admin grant [PLAYER] (ITEM_ID|credits) QUANTITY
   steepserver admin stats [PLAYER] [--key KEY] [--set KEY=VALUE]
   steepserver admin ledger [PLAYER] [-n N]
+  steepserver admin events [PLAYER] [-n N]        stat uploads from the game (XP, medals, unlocks)
+  steepserver admin scores [PLAYER]               personal best per challenge
+  steepserver admin entities [PLAYER]             profile entities (rider card, favorites)
   steepserver admin reseed [PLAYER]
   steepserver admin offers TEXT
 PLAYER defaults to the configured default player.
@@ -37,6 +40,13 @@ def add_parser(sub) -> None:
     q = a.add_parser("ledger", help="recent inventory changes")
     q.add_argument("player", nargs="?")
     q.add_argument("-n", type=int, default=20)
+    q = a.add_parser("events", help="recent stat uploads from the game")
+    q.add_argument("player", nargs="?")
+    q.add_argument("-n", type=int, default=20)
+    q = a.add_parser("scores", help="personal best per challenge")
+    q.add_argument("player", nargs="?")
+    q = a.add_parser("entities", help="profile entities (rider card, favorites)")
+    q.add_argument("player", nargs="?")
     q = a.add_parser("reseed", help="reset a player to the recorded state")
     q.add_argument("player", nargs="?")
     q = a.add_parser("offers", help="search the store catalogue by name")
@@ -85,6 +95,16 @@ def run(args, config: Config) -> int:
         for e in s.repos.ledger.recent(pid, args.n):
             print(f"{e['ts']}  {e['reason']:10s} {e['item_id']}  {e['delta']:+d} -> {e['balance']}"
                   + (f"  offer {e['offer_id']}" if e["offer_id"] else ""))
+    elif cmd == "events":
+        for e in s.repos.stat_events.recent(pid, args.n):
+            print(f"{e['ts']}  {e['name']:32s} {e['fields_json']}")
+    elif cmd == "scores":
+        for e in s.repos.challenge_scores.all(pid):
+            print(f"{e['challenge_id']:48s} {e['best_score']:>12g}  ({e['direction']}, {e['updated']})")
+    elif cmd == "entities":
+        for e in s.entities.for_profile(pid, limit=1000):
+            print(f"{e['entityId']}  {e['type']:20s} rev {e['revision']:<4} {e['lastModified']}  "
+                  f"obj keys: {', '.join(list(e.get('obj') or {})[:6])}")
     elif cmd == "reseed":
         s.reseed(pid)
         print(f"reseeded {pid}: {s.economy.credits(pid)} credits, level {s.stats.get(pid, LEVEL_KEY)}")

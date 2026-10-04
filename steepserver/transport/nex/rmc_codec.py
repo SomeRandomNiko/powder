@@ -122,6 +122,46 @@ def read_type_map(r: Reader) -> dict[str, int]:
     return {r.string(): r.u16() for _ in range(r.u32())}
 
 
+# Quazal Variant: u8 type + value. Seen in Steep: 1 int64, 2 double, 4 String, 6 uint64 (stat
+# events and stat groups). 3 bool (1 byte) and 5 DateTime (8 bytes) follow the Quazal definition
+# but have not been observed yet.
+V_NONE, V_INT64, V_DOUBLE, V_BOOL, V_STRING, V_DATETIME, V_UINT64 = range(7)
+
+
+def read_variant(r: Reader) -> tuple[int, object]:
+    t = r.u8()
+    if t == V_INT64:
+        return t, struct.unpack("<q", r.take(8))[0]
+    if t == V_DOUBLE:
+        return t, struct.unpack("<d", r.take(8))[0]
+    if t == V_BOOL:
+        return t, r.u8() != 0
+    if t == V_STRING:
+        return t, r.string()
+    if t in (V_DATETIME, V_UINT64):
+        return t, r.u64()
+    if t == V_NONE:
+        return t, None
+    raise ValueError(f"unknown Variant type {t}")
+
+
+def write_variant(w: Writer, t: int, value) -> Writer:
+    w.u8(t)
+    if t == V_INT64:
+        return w.raw(struct.pack("<q", value))
+    if t == V_DOUBLE:
+        return w.raw(struct.pack("<d", value))
+    if t == V_BOOL:
+        return w.bool(value)
+    if t == V_STRING:
+        return w.string(value)
+    if t in (V_DATETIME, V_UINT64):
+        return w.u64(value)
+    if t == V_NONE:
+        return w
+    raise ValueError(f"unknown Variant type {t}")
+
+
 def quazal_datetime(t: datetime.datetime) -> int:
     """Quazal DateTime packing (verified against a captured GetGameStorageTime reply)."""
     return t.second | t.minute << 6 | t.hour << 12 | t.day << 17 | t.month << 22 | t.year << 26

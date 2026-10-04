@@ -107,9 +107,90 @@ async def get_offers(request: web.Request) -> web.StreamResponse:
     return json_response(request, {"offers": offers}, f"catalog({len(offers)})")
 
 
+# ---- profile entities (rider card, favorites) ------------------------------------------------------
+def _int(q, name: str, default: int) -> int:
+    try:
+        return int(q.get(name, default))
+    except ValueError:
+        return default
+
+
+async def get_profile_entities(request: web.Request) -> web.StreamResponse:
+    """GET /v2/profiles/{pid}/entities?type=&tags=&offset=&limit= (own player from the DB)."""
+    entities = request.app[SERVICES].entities
+    pid = request.match_info["profile_id"]
+    q = request.query
+    if not entities.is_local(pid):
+        return await request.app[FALLBACK](request)
+    items = entities.for_profile(pid, q.get("type"), q.get("tags"), _int(q, "offset", 0), _int(q, "limit", 100))
+    return json_response(request, {"entities": items}, f"entities({len(items)})")
+
+
+async def get_entities_batch(request: web.Request) -> web.StreamResponse:
+    """GET /v2/profiles/entities?profileIds=a,b&type=PROFILE (rider cards of friends and self)."""
+    q = request.query
+    ids = [p for p in q.get("profileIds", "").split(",") if p]
+    if not ids:
+        return await request.app[FALLBACK](request)
+    items = request.app[SERVICES].entities.for_profiles(ids, q.get("type"), _int(q, "offset", 0),
+                                                         _int(q, "limit", 100))
+    return json_response(request, {"entities": items}, f"entities({len(items)})")
+
+
+def _owner(request: web.Request) -> str | None:
+    session = request.get(SESSION)
+    return session.profile_id if session else None
+
+
+async def get_entity(request: web.Request) -> web.StreamResponse:
+    e = request.app[SERVICES].entities.get(request.match_info["entity_id"])
+    return json_response(request, e, "entity") if e else await request.app[FALLBACK](request)
+
+
+async def put_entity(request: web.Request) -> web.Response:
+    try:
+        body = await request.json()
+        e = request.app[SERVICES].entities.put(request.match_info["entity_id"], body, _owner(request))
+    except ValueError as err:
+        return json_response(request, {"errorCode": 1, "message": str(err), "httpCode": 400}, "bad-request", 400)
+    return json_response(request, e, f"entity-saved(rev {e['revision']})")
+
+
+async def post_entity(request: web.Request) -> web.Response:
+    owner = _owner(request) or request.app[SERVICES].default_player_id()
+    try:
+        e = request.app[SERVICES].entities.create(await request.json(), owner)
+    except ValueError as err:
+        return json_response(request, {"errorCode": 1, "message": str(err), "httpCode": 400}, "bad-request", 400)
+    return json_response(request, e, "entity-created")
+
+
+async def delete_entity(request: web.Request) -> web.Response:
+    deleted = request.app[SERVICES].entities.delete(request.match_info["entity_id"])
+    return json_response(request, {}, "entity-deleted" if deleted else "entity-absent")
+
+
+async def put_populations_data(request: web.Request) -> web.StreamResponse:
+    """Keep what the game reports about the player's populations; answer like the recording."""
+    session = request.get(SESSION)
+    if session and request.can_read_body:
+        try:
+            request.app[SERVICES].repos.kv.set(session.profile_id, "populations_data", await request.json())
+        except ValueError:
+            pass
+    return await request.app[FALLBACK](request)
+
+
 def add_routes(app: web.Application) -> None:
     app.router.add_post("/v3/profiles/sessions", create_session)
     app.router.add_get("/v1/spaces/{space}/sandboxes/{sandbox}/rendezvous/configuration", rendezvous_configuration)
     app.router.add_get("/v1/profiles/{profile_id}/inventory", get_inventory)
     app.router.add_post("/v1/profiles/{profile_id}/inventory", post_inventory)
     app.router.add_get("/v1/spaces/{space}/offers", get_offers)
+    app.router.add_get("/v2/profiles/entities", get_entities_batch)
+    app.router.add_post("/v2/profiles/entities", post_entity)
+    app.router.add_get("/v2/profiles/entities/{entity_id}", get_entity)
+    app.router.add_put("/v2/profiles/entities/{entity_id}", put_entity)
+    app.router.add_delete("/v2/profiles/entities/{entity_id}", delete_entity)
+    app.router.add_get("/v2/profiles/{profile_id}/entities", get_profile_entities)
+    app.router.add_put("/v1/profiles/me/populations/data", put_populations_data)

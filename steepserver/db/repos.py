@@ -102,8 +102,96 @@ class StatsRepo:
             "ON CONFLICT(profile_id, group_name, key) DO UPDATE SET type = excluded.type, value = excluded.value",
             (profile_id.lower(), group_name, key, type_, value))
 
+    def get(self, profile_id: str, group_name: str, key: str) -> StatRow | None:
+        r = self.db.execute("SELECT key, type, value FROM stats WHERE profile_id = ? AND group_name = ? "
+                            "AND key = ?", (profile_id.lower(), group_name, key)).fetchone()
+        return StatRow(r["key"], r["type"], bytes(r["value"])) if r else None
+
     def clear(self, profile_id: str) -> None:
         self.db.execute("DELETE FROM stats WHERE profile_id = ?", (profile_id.lower(),))
+
+
+class StatEventsRepo:
+    def __init__(self, db: Database):
+        self.db = db
+
+    def add(self, profile_id: str, name: str, fields: dict) -> None:
+        self.db.execute("INSERT INTO stat_events(profile_id, ts, name, fields_json) VALUES (?,?,?,?)",
+                        (profile_id.lower(), utc_now(), name, json.dumps(fields)))
+
+    def recent(self, profile_id: str, limit: int = 50) -> list[dict]:
+        return [dict(r) for r in self.db.execute(
+            "SELECT * FROM stat_events WHERE profile_id = ? ORDER BY id DESC LIMIT ?", (profile_id.lower(), limit))]
+
+
+class ChallengeScoresRepo:
+    def __init__(self, db: Database):
+        self.db = db
+
+    def get(self, profile_id: str, challenge_id: str) -> dict | None:
+        r = self.db.execute("SELECT * FROM challenge_scores WHERE profile_id = ? AND challenge_id = ?",
+                            (profile_id.lower(), challenge_id)).fetchone()
+        return dict(r) if r else None
+
+    def set(self, profile_id: str, challenge_id: str, direction: str, score: float, replay: str | None) -> None:
+        self.db.execute(
+            "INSERT INTO challenge_scores(profile_id, challenge_id, direction, best_score, replay, updated) "
+            "VALUES (?,?,?,?,?,?) ON CONFLICT(profile_id, challenge_id) DO UPDATE SET direction = "
+            "excluded.direction, best_score = excluded.best_score, replay = excluded.replay, updated = excluded.updated",
+            (profile_id.lower(), challenge_id, direction, score, replay, utc_now()))
+
+    def all(self, profile_id: str) -> list[dict]:
+        return [dict(r) for r in self.db.execute(
+            "SELECT * FROM challenge_scores WHERE profile_id = ? ORDER BY challenge_id", (profile_id.lower(),))]
+
+
+class EntitiesRepo:
+    """Rows <-> UbiServices entity dicts (entityId, profileId, spaceId, type, editable, name, tags,
+    obj, lastModified, revision[, extendedStorage])."""
+
+    def __init__(self, db: Database):
+        self.db = db
+
+    @staticmethod
+    def _entity(r) -> dict:
+        e = {"entityId": r["entity_id"], "profileId": r["profile_id"], "spaceId": r["space_id"],
+             "type": r["type"], "editable": bool(r["editable"]), "name": r["name"],
+             "tags": json.loads(r["tags_json"]), "obj": json.loads(r["obj_json"]),
+             "lastModified": r["last_modified"], "revision": r["revision"]}
+        if r["extended_json"] is not None:
+            e["extendedStorage"] = json.loads(r["extended_json"])
+        return e
+
+    def get(self, entity_id: str) -> dict | None:
+        r = self.db.execute("SELECT * FROM profile_entities WHERE entity_id = ?", (entity_id.lower(),)).fetchone()
+        return self._entity(r) if r else None
+
+    def for_profile(self, profile_id: str, type_: str | None = None) -> list[dict]:
+        sql, args = "SELECT * FROM profile_entities WHERE profile_id = ?", [profile_id.lower()]
+        if type_:
+            sql += " AND type = ?"
+            args.append(type_)
+        return [self._entity(r) for r in self.db.execute(sql + " ORDER BY last_modified", args)]
+
+    def put(self, e: dict) -> None:
+        self.db.execute(
+            "INSERT INTO profile_entities(entity_id, profile_id, space_id, type, name, editable, tags_json, "
+            "obj_json, extended_json, revision, last_modified) VALUES (?,?,?,?,?,?,?,?,?,?,?) "
+            "ON CONFLICT(entity_id) DO UPDATE SET profile_id = excluded.profile_id, space_id = excluded.space_id, "
+            "type = excluded.type, name = excluded.name, editable = excluded.editable, tags_json = excluded.tags_json, "
+            "obj_json = excluded.obj_json, extended_json = excluded.extended_json, revision = excluded.revision, "
+            "last_modified = excluded.last_modified",
+            (e["entityId"].lower(), e["profileId"].lower(), e["spaceId"], e["type"], e.get("name") or "",
+             int(bool(e.get("editable", True))), json.dumps(e.get("tags") or []), json.dumps(e.get("obj") or {}),
+             json.dumps(e["extendedStorage"]) if "extendedStorage" in e else None,
+             int(e.get("revision") or 1), e.get("lastModified") or utc_now()))
+
+    def delete(self, entity_id: str) -> bool:
+        return self.db.execute("DELETE FROM profile_entities WHERE entity_id = ?",
+                               (entity_id.lower(),)).rowcount > 0
+
+    def clear(self, profile_id: str) -> None:
+        self.db.execute("DELETE FROM profile_entities WHERE profile_id = ?", (profile_id.lower(),))
 
 
 class LedgerRepo:
@@ -144,3 +232,6 @@ class Repos:
         self.stats = StatsRepo(db)
         self.ledger = LedgerRepo(db)
         self.kv = KvRepo(db)
+        self.stat_events = StatEventsRepo(db)
+        self.challenge_scores = ChallengeScoresRepo(db)
+        self.entities = EntitiesRepo(db)

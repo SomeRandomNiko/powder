@@ -152,3 +152,20 @@ async def test_unknown_ticket_is_attributed_in_lenient_mode(services, player, ne
     client.call("LoginProtocol", 5, "LoginProtocol::LoginWithToken_V1", params)
     out = rmc.Reader((await client.read()).body)
     assert out.guid() == uuid.UUID(player)
+
+
+async def test_uploaded_progress_shows_in_the_next_stat_read(services, player, nex):
+    from test_progression import encode_events
+    from steepserver.transport.nex.rmc_codec import V_UINT64
+    _, client = nex
+    session = services.accounts.login(LoginRequest("127.0.0.1"))
+    client.call("LoginProtocol", 5, "LoginProtocol::LoginWithToken_V1",
+                rmc.Writer().u32(0).string(session.ticket).bytes())
+    await client.read()
+    client.call("PlayerStats2Protocol", 6, "PlayerStats2Protocol::PostEvents_V1", encode_events(
+        [("update_level", {"expertise_id": (V_UINT64, 6), "level_expertise": (V_UINT64, 50)})]))
+    assert (await client.read()).body == b""
+    client.call("PlayerStats2Protocol", 7, "PlayerStats2Protocol::GetStatisticGroup_V1",
+                rmc.Writer().u32(1).string("StatisticsResult").u16(1).string("player_profile").bytes())
+    _, rows = decode_stat_group((await client.read()).body)
+    assert next(r for r in rows if r.key == "level_stat:6:infinite").value[0] == 50
