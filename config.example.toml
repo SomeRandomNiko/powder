@@ -1,0 +1,34 @@
+# Copy to config.toml and adjust. Every setting is optional (these are the defaults).
+
+[server]
+bind = "0.0.0.0"
+public_host = "127.0.0.1"   # address the game uses to reach this server (LAN/VPN IP for friends)
+https_port = 443
+nex_port = 6005
+data_dir = "data"           # database, logs, uploaded game logs, generated TLS cert + NEX signing key
+recordings_dir = "recordings"   # replies recorded from your own online sessions (personal; gitignored)
+log_level = "INFO"
+strict_tickets = false      # true: refuse requests with tickets the server did not issue
+
+[players]
+# default = "<profile id>"  # player used when a login cannot be told apart. Unset: the account your
+#                           # recordings belong to, or (no recordings) a local player created on first run.
+# Map friends' machines to their own player (profile id), by the IP the server sees:
+# [players.bind]
+# "192.168.1.20" = "<profile id>"
+
+[gameplay]
+unlimited_heli_tickets = false   # (planned)
+starting_credits = 0             # credits for newly created players
+unlock_all = false               # (planned)
+xp_multiplier = 1.0              # (planned, phase 2)
+free_purchases = false           # shop purchases do not cost credits
+reward_credit_multiplier = 1.0   # scale credits from challenge rewards
+
+# Per-player overrides:
+# [gameplay.player."<profile id>"]
+# free_purchases = true
+
+[plugins]
+enabled = ["*"]             # plugin file names (without .py) in ./plugins, "*" = all
+disabled = []
