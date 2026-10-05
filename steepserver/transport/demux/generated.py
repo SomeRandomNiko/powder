@@ -51,11 +51,13 @@ def ach_subscribe(ctx: ServiceContext, req: ServiceRequest) -> bytes:
 
 @handler("ach_frontend", 3)
 def ach_unlocked(ctx: ServiceContext, req: ServiceRequest) -> bytes:
-    """{3: {1 profile id, 2: {1: {1: {1 product code, 2 platform}, 2: unlocked...}}}}: the product key is
-    echoed from the request, with nothing unlocked."""
+    """{3: {1 profile id, 2: {1: {1: {1 product code, 2 platform}, 2: {1: {1 achievement id, 2 time}...}}}}}:
+    the product key is echoed from the request, with nothing unlocked. The earned-list message (2) must
+    be present even when empty, or Connect reports "Achievements is missing for product" and fails to
+    sync."""
     product = None
     fields = pb.try_decode(req.body) if isinstance(req.body, bytes) else None
     if fields:                                          # request {2: {1 product code, 2 platform}}
         product = pb.first(fields, 2)
     key = product if isinstance(product, bytes) else pb.encode([(1, "STP"), (2, "PC")])
-    return make_reply(req, 3, [(1, ctx.profile_id or ""), (2, [(1, [(1, key)])])])
+    return make_reply(req, 3, [(1, ctx.profile_id or ""), (2, [(1, [(1, key), (2, b"")])])])
