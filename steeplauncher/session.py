@@ -57,8 +57,10 @@ class Session:
 
     def set(self, key: str, state: str, text: str = "", actions: list[str] | None = None, details: str = "") -> None:
         s = self.step(key)
+        changed = (s.state, s.text) != (state, text)
         s.state, s.text, s.actions, s.details = state, text, actions or [], details
-        log.info("%s: %s %s", key, state, text)
+        if changed:                                      # waiting loops re-set the same text
+            log.info("%s: %s %s", key, state, text)
         self.on_update()
 
     def ask(self, key: str, text: str, actions: list[str], details: str = "") -> str:

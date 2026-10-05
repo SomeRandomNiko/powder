@@ -14,6 +14,7 @@ from steepserver.hostnames import REDIRECT_HOSTS
 
 HOSTS_PATH = Path(r"C:\Windows\System32\drivers\etc\hosts")
 MARKER = "steep-re launcher redirect"
+LEGACY_MARKERS = ("steep-re emulator redirect",)    # block comment written by tools/redirect.ps1
 
 
 @dataclass(frozen=True)
@@ -54,17 +55,20 @@ def lines_for_display(address: str, hosts: list[str] = REDIRECT_HOSTS) -> str:
     return "\n".join(f"{address} {h}" for h in hosts)
 
 
-def read_block(text: str) -> list[str]:
-    return [ln for ln in text.splitlines() if MARKER in ln or _is_redirect_line(ln)]
-
-
-def _is_redirect_line(line: str) -> bool:
+def _ours(line: str) -> bool:
+    """A line of our block: its marker comment (current or legacy) or an entry for one of our hosts."""
+    if MARKER in line or any(m in line for m in LEGACY_MARKERS):
+        return True
     parts = line.split()
     return len(parts) == 2 and parts[1] in REDIRECT_HOSTS
 
 
+def read_block(text: str) -> list[str]:
+    return [ln for ln in text.splitlines() if _ours(ln)]
+
+
 def strip_block(text: str) -> str:
-    kept = [ln for ln in text.splitlines() if not (MARKER in ln or _is_redirect_line(ln))]
+    kept = [ln for ln in text.splitlines() if not _ours(ln)]
     return "\n".join(kept).rstrip("\n") + ("\n" if kept else "")
 
 

@@ -41,6 +41,19 @@ def test_hosts_add_remove_keeps_other_lines(tmp_path, monkeypatch):
     assert hosts.read_text().strip() == original.strip()
 
 
+def test_hosts_replaces_legacy_block(tmp_path, monkeypatch):
+    """A block written by tools/redirect.ps1 (other marker, demux on 127.0.0.2) is replaced cleanly."""
+    monkeypatch.setattr(dns, "flush_dns", lambda: None)
+    hosts = tmp_path / "hosts"
+    hosts.write_text("# sample\n# steep-re emulator redirect (remove this block to restore online play)\n"
+                     "127.0.0.1 public-ubiservices.ubi.com\n127.0.0.2 dmx.upc.ubisoft.com\n")
+    hostsfix.apply("add", "127.0.0.1", hosts, tmp_path / "bak")
+    text = hosts.read_text()
+    assert "emulator redirect" not in text and "127.0.0.2" not in text
+    assert text.splitlines().count("127.0.0.1 public-ubiservices.ubi.com") == 1
+    assert "127.0.0.1 dmx.upc.ubisoft.com" in text.splitlines()
+
+
 def test_hosts_block_lines():
     block = dns.hosts_block("127.0.0.1")
     assert block.splitlines()[0].startswith("# " + dns.MARKER)
