@@ -36,7 +36,10 @@ static void logline(const char *fmt, ...) {
     HANDLE f = CreateFileW(g_log, FILE_APPEND_DATA, FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE,
                            NULL, OPEN_ALWAYS, FILE_ATTRIBUTE_NORMAL, NULL);
     if (f == INVALID_HANDLE_VALUE) return;
-    char line[600]; int n = snprintf(line, sizeof(line), "%s\r\n", buf);
+    SYSTEMTIME t; GetLocalTime(&t);        // same clock as the server log, for lining them up
+    char line[640];
+    int n = snprintf(line, sizeof(line), "%02d:%02d:%02d.%03d %s\r\n", t.wHour, t.wMinute, t.wSecond,
+                     t.wMilliseconds, buf);
     DWORD w; SetFilePointer(f, 0, NULL, FILE_END); WriteFile(f, line, (DWORD)n, &w, NULL); CloseHandle(f);
 }
 
