@@ -6,7 +6,8 @@ import logging
 
 from aiohttp import web
 
-from ...constants import SPACE_ID
+from ...constants import APP_ID, SPACE_ID
+from ...core.sessions import ubi_shaped_ticket
 from ...core.identity import LoginRequest, parse_authorization
 from ...services.accounts import AuthError
 from ...services.economy import EconomyError
@@ -30,8 +31,12 @@ def client_ip(request: web.Request) -> str:
 
 # ---- login --------------------------------------------------------------------------------------
 async def create_session(request: web.Request) -> web.Response:
-    """POST /v3/profiles/sessions. The game authenticates with `uplaypc_v1 t=<Connect ticket>`; we
-    issue our own ticket, which it then sends as `Ubi_v1 t=` and as the NEX LoginWithToken token."""
+    """POST /v3/profiles/sessions. The game authenticates with `uplaypc_v1 t=<Connect ticket>` (or
+    `Basic` with empty credentials when Connect has none); we issue our own ticket, which it then
+    sends as `Ubi_v1 t=` and as the NEX LoginWithToken token. Ubisoft Connect logs in here too
+    (`rm_v1` remember-me ticket, `Ubi_v1` refresh, or `Basic` email:password on a fresh sign-in):
+    every credential is accepted, the account resolver decides who it is. Passwords are never
+    logged or stored."""
     services = request.app[SERVICES]
     scheme, value = parse_authorization(request.headers.get("Authorization"))
     # What the game got from Ubisoft Connect (its platform ticket) says a lot about whether Connect
@@ -43,9 +48,20 @@ async def create_session(request: web.Request) -> web.Response:
     except AuthError as e:
         return json_response(request, {"errorCode": 1, "message": str(e), "httpCode": 401}, "refused", 401)
     p = session.player
-    body = dict(captured_session(services.assets.http) or {"platformType": "uplay", "environment": "Prod",
-                                                             "sessionKey": "", "rememberMeTicket": None})
-    body.update(profileId=p.profile_id, userId=p.user_id, nameOnPlatform=p.name, spaceId=SPACE_ID,
+    app_id = request.headers.get("Ubi-AppId", "").lower()
+    connect = bool(app_id) and app_id != APP_ID
+    if connect:
+        # Ubisoft Connect (any other app id): its own reply shape. It keeps the remember-me ticket
+        # and signs in with it next time (`rm_v1`), which we accept like any other credential.
+        body = dict(captured_session(services.assets.connect_http) or {"platformType": "uplay",
+                                                                       "environment": "Prod"})
+        body.update(rememberMeTicket=ubi_shaped_ticket(app_id, session.session_id),
+                    twoFactorAuthenticationTicket=None)
+    else:
+        body = dict(captured_session(services.assets.http) or {"platformType": "uplay", "environment": "Prod",
+                                                                 "sessionKey": "", "rememberMeTicket": None})
+        body["spaceId"] = SPACE_ID
+    body.update(profileId=p.profile_id, userId=p.user_id, nameOnPlatform=p.name,
                 ticket=session.ticket, sessionId=session.session_id, expiration=iso_now(3 * 3600),
                 serverTime=iso_now(), clientIp=session.client_ip)
     await services.events.emit("login", session=session)

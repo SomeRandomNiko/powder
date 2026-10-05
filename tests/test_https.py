@@ -1,4 +1,5 @@
 """HTTPS (UbiServices) app through aiohttp's test client, with the game's real hostnames."""
+import base64
 import json
 
 import pytest
@@ -31,6 +32,24 @@ async def test_login_issues_our_ticket_for_the_default_player(client, services):
     assert body["profileId"] == syn.PLAYER and body["nameOnPlatform"] == syn.PLAYER_NAME
     assert body["spaceId"] == SPACE_ID and body["ticket"] != "recorded-ticket"
     assert body["ticket"].startswith("steep.") and services.sessions.by_token(body["ticket"])
+
+
+CONNECT_APP = "f68a4bb5-608a-4ff2-8123-be8ef797e0a6"
+
+
+@pytest.mark.parametrize("auth", ["rm_v1 t=remember-me", "Basic dXNlckBleGFtcGxlLmNvbTpzZWNyZXQ=", "ubi_v1 t=x"])
+async def test_ubisoft_connect_login(client, services, auth):
+    """Connect signs in with a remember-me ticket, email:password or a refresh; all are accepted, and it
+    gets a Ubisoft-shaped ticket plus a new remember-me ticket."""
+    r = await client.post("/v3/profiles/sessions", json={"rememberMe": True},
+                          headers={"Ubi-AppId": CONNECT_APP, "Authorization": auth})
+    assert r.status == 200
+    body = await r.json()
+    assert body["profileId"] == syn.PLAYER
+    header = json.loads(base64.b64decode(body["ticket"].split(".")[0]))
+    assert header["aid"] == CONNECT_APP and header["sid"] == body["sessionId"]
+    assert body["rememberMeTicket"] and body["twoFactorAuthenticationTicket"] is None
+    assert services.sessions.by_token(body["ticket"]).profile_id == syn.PLAYER
 
 
 async def test_rendezvous_points_at_our_nex_server(client):

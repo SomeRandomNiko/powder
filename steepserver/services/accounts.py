@@ -10,6 +10,7 @@ import logging
 from typing import Callable
 
 from ..config import Config
+from ..constants import APP_ID
 from ..core.identity import AccountResolver, DefaultResolver, LoginRequest, Player
 from ..core.sessions import PlayerSession, SessionRegistry
 from ..db.repos import Repos
@@ -40,8 +41,11 @@ class AccountService:
         profile_id = self.resolver.resolve(req)
         if not profile_id:
             raise AuthError("login refused by account resolver")
-        session = self.sessions.issue(self.player(profile_id), req.client_ip)
-        log.info("login %s (%s) from %s", session.player.name, profile_id, req.client_ip)
+        app_id = {k.lower(): v for k, v in req.headers.items()}.get("ubi-appid", "").lower()
+        connect = app_id if app_id and app_id != APP_ID else ""        # Ubisoft Connect and its parts
+        session = self.sessions.issue(self.player(profile_id), req.client_ip, app_id=connect)
+        log.info("login %s (%s) from %s%s", session.player.name, profile_id, req.client_ip,
+                 " [Ubisoft Connect]" if connect else "")
         return session
 
     def session_for_ticket(self, ticket: str, client_ip: str) -> PlayerSession | None:

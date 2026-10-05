@@ -11,6 +11,7 @@ from ..core.sessions import SessionRegistry
 from ..db.database import Database
 from ..db.repos import Repos
 from ..fixtures.catalog import OfferCatalog
+from ..fixtures.demux import DemuxFixtures
 from ..fixtures.http import HttpFixtures
 from ..fixtures.rmc import RmcFixtures
 from .accounts import AccountService
@@ -31,6 +32,8 @@ class Assets:
     catalog: OfferCatalog
     inventory_updates: Path | None = None
     recorded_profile_id: str | None = None       # whose account the recordings are from
+    connect_http: HttpFixtures = field(default_factory=lambda: HttpFixtures([]))   # Ubisoft Connect's
+    demux: DemuxFixtures = field(default_factory=DemuxFixtures)                     # own traffic
 
     @classmethod
     def load(cls, recordings_dir: Path) -> "Assets":
@@ -39,7 +42,9 @@ class Assets:
         return cls(http=http, rmc=RmcFixtures.load(recordings_dir / "fixtures-rmc.json"),
                    catalog=OfferCatalog.from_fixtures(http),
                    inventory_updates=recordings_dir / "inventory-updates.json",
-                   recorded_profile_id=(session or {}).get("profileId", "").lower() or None)
+                   recorded_profile_id=(session or {}).get("profileId", "").lower() or None,
+                   connect_http=HttpFixtures.load(recordings_dir / "connect-fixtures.json"),
+                   demux=DemuxFixtures.load(recordings_dir / "demux.json"))
 
     @property
     def empty(self) -> bool:

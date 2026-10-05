@@ -1,4 +1,5 @@
-"""Runs the whole server in one process / one event loop: HTTPS (UbiServices) + UDP (NEX)."""
+"""Runs the whole server in one process / one event loop: HTTPS (UbiServices) + UDP (NEX) + TLS demux
+(Ubisoft Connect) + the local CA's CRL over HTTP."""
 from __future__ import annotations
 
 import asyncio
@@ -10,6 +11,7 @@ from . import tls
 from .config import Config
 from .plugins.loader import PluginManager
 from .services import Services
+from .transport.demux import server as demux_server
 from .transport.https import app as https_app
 from .transport.nex import secure
 from .transport.nex import server as nex_server
@@ -51,6 +53,14 @@ async def run(config: Config) -> None:
         log.warning("cannot serve the CRL on 127.0.0.1:%d (%s): Ubisoft Connect will reject our "
                     "certificate", cfg.crl_port, e)
 
+    demux = None
+    try:
+        demux = await demux_server.start(services, cfg.demux_host, cfg.demux_port, pki.server_pem)
+        log.info("Ubisoft Connect demux listening on %s:%d (%d recorded replies)", cfg.demux_host,
+                 cfg.demux_port, len(services.assets.demux))
+    except OSError as e:
+        log.warning("cannot start the Ubisoft Connect demux on %s:%d (%s)", cfg.demux_host, cfg.demux_port, e)
+
     dispatcher = RmcDispatcher(services, plugins)
     nex, transport = await nex_server.start(services, dispatcher, signing_key, cfg.bind, cfg.public_host,
                                             cfg.nex_port)
@@ -62,6 +72,8 @@ async def run(config: Config) -> None:
         await runner.cleanup()
         if crl_runner:
             await crl_runner.cleanup()
+        if demux:
+            demux.close()
         services.db.close()
         log.info("stopped")
 

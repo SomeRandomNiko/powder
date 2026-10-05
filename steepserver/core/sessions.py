@@ -7,6 +7,8 @@ WebSockets and NEX connection, which is what lets the server push messages to a 
 """
 from __future__ import annotations
 
+import base64
+import json
 import logging
 import secrets
 import time
@@ -19,6 +21,16 @@ from .identity import Player
 
 log = logging.getLogger("steep.sessions")
 SESSION_TTL_S = 3 * 3600
+
+
+def ubi_shaped_ticket(app_id: str, session_id: str) -> str:
+    """A ticket shaped like Ubisoft's (base64 JSON header . payload . MAC), for Ubisoft Connect, in
+    case it reads the header. The payload is random: only this server ever validates tickets."""
+    header = json.dumps({"ver": "1", "aid": app_id, "env": "Prod", "sid": session_id, "typ": "JWE",
+                         "enc": "A128CBC", "iv": secrets.token_urlsafe(16), "int": "HS256",
+                         "kid": str(uuid.uuid4())}, indent=2)
+    return ".".join((base64.b64encode(header.encode()).decode(), secrets.token_urlsafe(96),
+                     secrets.token_urlsafe(32)))
 
 
 class WsChannel(Protocol):
@@ -52,9 +64,10 @@ class SessionRegistry:
         self.by_session_id: dict[str, PlayerSession] = {}
         self.by_player: dict[str, PlayerSession] = {}     # most recent session per player
 
-    def issue(self, player: Player, client_ip: str) -> PlayerSession:
-        s = PlayerSession(player, ticket="steep." + secrets.token_urlsafe(48),
-                          session_id=str(uuid.uuid4()), client_ip=client_ip)
+    def issue(self, player: Player, client_ip: str, app_id: str = "") -> PlayerSession:
+        session_id = str(uuid.uuid4())
+        s = PlayerSession(player, ticket=ubi_shaped_ticket(app_id, session_id) if app_id else
+                          "steep." + secrets.token_urlsafe(48), session_id=session_id, client_ip=client_ip)
         old = self.by_player.get(player.profile_id)
         if old:                                  # keep live channels across a re-login
             s.websockets, s.nex = old.websockets, old.nex

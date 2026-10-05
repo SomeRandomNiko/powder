@@ -18,6 +18,7 @@ from pathlib import Path
 from aiohttp import web
 
 from ... import tls
+from ...constants import APP_ID
 from ...core.identity import parse_authorization
 from . import routes_ubi
 from .keys import DATA_DIR, FALLBACK, HOW, NEX_PUBLIC_KEY, PLUGINS, SERVICES, SESSION
@@ -69,8 +70,16 @@ async def session_middleware(request: web.Request, handler):
 
 
 async def fallback(request: web.Request) -> web.Response:
-    """Recorded reply for anything without real logic."""
-    hit = request.app[SERVICES].assets.http.lookup(request.method, host_of(request), request.path_qs)
+    """Recorded reply for anything without real logic. Requests from Ubisoft Connect (any app id other
+    than the game's) try Connect's own recordings first, everything else the game's."""
+    assets = request.app[SERVICES].assets
+    app_id = request.headers.get("Ubi-AppId", "").lower()
+    order = (assets.connect_http, assets.http) if app_id and app_id != APP_ID else (assets.http, assets.connect_http)
+    hit = None
+    for fixtures in order:
+        hit = fixtures.lookup(request.method, host_of(request), request.path_qs)
+        if hit:
+            break
     if hit is None:
         request[HOW] = "UNMATCHED"
         return web.Response(body=b"{}", headers={"Content-Type": routes_ubi.JSON})
