@@ -144,7 +144,7 @@ class Session:
                 f"no server answers at {self.cfg.server_address}:{self.cfg.server_https_port}"
             self.set("server", FAILED, where)
             return False
-        started = " (started)" if self.server_proc else " (already running)"
+        started = " (run by the launcher)" if self.server_proc else " (already running)"
         self.set("server", OK, f"{self.cfg.server_address}{started}, {st.get('players', 0)} player(s)")
         return True
 

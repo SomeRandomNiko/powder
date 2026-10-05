@@ -33,7 +33,8 @@ def tls_context(cert_file: Path) -> ssl.SSLContext:
         # server-side SSLObject.server_hostname is always None: keep what the client asked for
         ssl_object.steep_sni = (server_name or "").lower()
         # logged before the handshake completes: a hello without a matching "tls ok" = the client gave up
-        log.info("tls hello for %s", ssl_object.steep_sni or "(no SNI)")
+        # no SNI = a client connecting by address (the launcher's status checks): only at debug level
+        (log.info if ssl_object.steep_sni else log.debug)("tls hello for %s", ssl_object.steep_sni or "(no SNI)")
     ctx.sni_callback = remember_sni
     return ctx
 
@@ -46,7 +47,7 @@ class _Router(asyncio.Protocol):
         # called after the TLS handshake: hand the connection over and get out of the way
         sni = getattr(transport.get_extra_info("ssl_object"), "steep_sni", "")
         peer = transport.get_extra_info("peername") or ("?", 0)
-        log.info("tls ok %s:%s for %s", peer[0], peer[1], sni or "(no SNI)")
+        (log.info if sni else log.debug)("tls ok %s:%s for %s", peer[0], peer[1], sni or "(no SNI)")
         if sni == DEMUX_HOST:
             loop = asyncio.get_running_loop()
             reader = asyncio.StreamReader()
