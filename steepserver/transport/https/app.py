@@ -13,7 +13,6 @@ from __future__ import annotations
 
 import datetime
 import logging
-import ssl
 from pathlib import Path
 
 from aiohttp import web
@@ -21,7 +20,7 @@ from aiohttp import web
 from ... import tls
 from ...constants import APP_ID
 from ...core.identity import parse_authorization
-from . import routes_ubi
+from . import routes_steep, routes_ubi
 from .keys import DATA_DIR, FALLBACK, HOW, NEX_PUBLIC_KEY, PLUGINS, SERVICES, SESSION
 from .routes_ubi import client_ip
 from .websocket import websocket
@@ -124,34 +123,21 @@ def build_app(services, plugins=None, *, nex_public_key: str = "") -> web.Applic
     app[NEX_PUBLIC_KEY] = nex_public_key
     app[DATA_DIR] = Path(services.config.data_dir)
     app[FALLBACK] = fallback
+    routes_steep.add_routes(app)
     routes_ubi.add_routes(app)
     app.router.add_get("/v2/websocket", websocket)
     app.router.add_route("*", "/{tail:.*}", fallback)      # last: everything else
     return app
 
 
-def tls_context(cert_file: Path) -> ssl.SSLContext:
-    ctx = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
-    ctx.load_cert_chain(str(cert_file))
-    return ctx
-
-
-async def start_crl(crl, port: int) -> web.AppRunner:
-    """Plain HTTP on 127.0.0.1: the local CA's revocation list (Windows checks it for Ubisoft Connect).
-    `crl` is a callable returning the DER bytes."""
+async def start_crl(crl, host: str, port: int) -> web.AppRunner:
+    """Plain HTTP: the local CA's revocation list (Windows checks it for Ubisoft Connect), reached as
+    http://public-ubiservices.ubi.com/steep-ca.crl. `crl` is a callable returning the DER bytes."""
     async def serve(request: web.Request) -> web.Response:
         return web.Response(body=crl(), content_type="application/pkix-crl")
     app = web.Application()
     app.router.add_get(tls.CRL_PATH, serve)
     runner = web.AppRunner(app, access_log=None)
     await runner.setup()
-    await web.TCPSite(runner, "127.0.0.1", port).start()
-    return runner
-
-
-async def start(app: web.Application, bind: str, port: int, cert_file: Path | None) -> web.AppRunner:
-    runner = web.AppRunner(app, access_log=None)
-    await runner.setup()
-    site = web.TCPSite(runner, bind, port, ssl_context=tls_context(cert_file) if cert_file else None)
-    await site.start()
+    await web.TCPSite(runner, host, port).start()
     return runner

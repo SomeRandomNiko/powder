@@ -26,27 +26,16 @@ from cryptography.hazmat.primitives import hashes, serialization
 from cryptography.hazmat.primitives.asymmetric import ec
 from cryptography.x509.oid import ExtendedKeyUsageOID, NameOID
 
+from .hostnames import CERT_NAMES, CRL_HOST
+
 log = logging.getLogger("steep.tls")
 
-HOSTNAMES = [
-    "public-ubiservices.ubi.com",
-    "msr-public-ubiservices.ubi.com",
-    "public-im-ubiservices.ubi.com",
-    "public-ws-ubiservices.ubi.com",
-    "steep-prod-pc.steep.olympus.ubi.com",
-    "dmx.upc.ubisoft.com",
-    "*.ubiservices.ubi.com",
-    "*.olympus.ubi.com",
-    "*.upc.ubi.com",
-    "*.upc.ubisoft.com",
-    "*.cdn.ubi.com",                                     # static3.cdn.ubi.com: Connect's internet check
-    "*.ubi.com",
-    "*.ubisoft.com",
-]
+HOSTNAMES = CERT_NAMES
 PERMITTED_DOMAINS = ["ubi.com", "ubisoft.com"]          # NameConstraints: these and their subdomains
 PERMITTED_NET = ipaddress.ip_network("127.0.0.0/8")
 CRL_PATH = "/steep-ca.crl"
-CRL_URL = "http://127.0.0.1" + CRL_PATH                  # served by app.py on 127.0.0.1:80
+CRL_URL = f"http://{CRL_HOST}{CRL_PATH}"                 # plain HTTP on port 80 of the server: a redirected
+                                                         # hostname, so it works wherever the server runs
 CA_NAME = "steepserver local CA"
 SERVER_ORG = "steepserver (local)"
 
@@ -130,8 +119,7 @@ def _make_server(ca_cert: x509.Certificate, ca_key) -> tuple[x509.Certificate, e
             .serial_number(x509.random_serial_number())
             .not_valid_before(now - _DAY).not_valid_after(now + SERVER_LIFETIME)
             .add_extension(x509.SubjectAlternativeName(
-                [x509.DNSName(h) for h in HOSTNAMES] + [x509.IPAddress(ipaddress.ip_address("127.0.0.1")),
-                                                        x509.IPAddress(ipaddress.ip_address("127.0.0.2"))]),
+                [x509.DNSName(h) for h in HOSTNAMES] + [x509.IPAddress(ipaddress.ip_address("127.0.0.1"))]),
                 critical=False)
             .add_extension(x509.BasicConstraints(ca=False, path_length=None), critical=True)
             .add_extension(x509.KeyUsage(digital_signature=True, content_commitment=False,
@@ -157,18 +145,20 @@ def _load_ca(ca_pem: Path, ca_key_pem: Path):
 
 
 def _server_ok(server_pem: Path, ca_cert: x509.Certificate) -> bool:
-    """An existing server.pem is reused only if this CA issued it and it is not about to expire.
-    (Replaces the self-signed certificate of earlier versions automatically.)"""
+    """An existing server.pem is reused only if this CA issued it, it is not about to expire, and it has
+    the current names and CRL point. (Earlier versions' certificates are replaced automatically.)"""
     if not server_pem.exists():
         return False
     try:
         cert = x509.load_pem_x509_certificates(server_pem.read_bytes())[0]
-    except ValueError:
+        names = cert.extensions.get_extension_for_class(x509.SubjectAlternativeName).value
+        cdp = cert.extensions.get_extension_for_class(x509.CRLDistributionPoints).value
+    except (ValueError, x509.ExtensionNotFound):
         return False
     return (cert.issuer == ca_cert.subject and cert.subject != cert.issuer
             and cert.not_valid_after_utc - _now() > 30 * _DAY
-            and set(HOSTNAMES) <= set(cert.extensions.get_extension_for_class(
-                x509.SubjectAlternativeName).value.get_values_for_type(x509.DNSName)))
+            and set(HOSTNAMES) <= set(names.get_values_for_type(x509.DNSName))
+            and [p.full_name[0].value for p in cdp] == [CRL_URL])
 
 
 def ensure_pki(tls_dir: Path) -> Pki:

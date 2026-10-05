@@ -42,13 +42,16 @@ offline mode. So the server also stands in for what Connect needs:
 - **Login**: Connect's `POST /v3/profiles/sessions` (remember-me, refresh or email:password; every
   credential is accepted, passwords are never logged or stored) and its other UbiServices calls,
   answered from `recordings/connect-fixtures.json`.
-- **Demux** (`dmx.upc.ubisoft.com`, mapped to `127.0.0.2:443` by the hosts file): Connect's own
-  protocol for login, owned games, play sessions and ownership tokens
-  (`transport/demux/`, replies from `recordings/demux.json`).
+- **Demux** (`dmx.upc.ubisoft.com`): Connect's own protocol for login, owned games, play sessions and
+  ownership tokens (`transport/demux/`, replies from `recordings/demux.json`). It shares port 443 with
+  HTTPS: the listener routes by the requested hostname (`transport/tls_router.py`), so every Ubisoft
+  hostname points at the same address (`steepserver/hostnames.py` lists them).
 - **Internet check** (`static3.cdn.ubi.com/.../test_internet.txt`) and CORS for Connect's web UI.
+- **Cloud saves** are switched off in what Connect is told about the games (`connect_cloud_saves`), so it
+  never prompts to sync.
 - **Certificates**: Connect checks them through Windows, so the server generates a local CA in
   `data/tls/`, restricted by name constraints to `ubi.com` / `ubisoft.com` / loopback, and serves its
-  revocation list on `http://127.0.0.1/steep-ca.crl`. Trust it once:
+  revocation list on `http://public-ubiservices.ubi.com/steep-ca.crl` (port 80). Trust it once:
 
 ```
 uv run steepserver admin trust install    # current user's trusted roots; Windows asks to confirm
@@ -56,8 +59,10 @@ uv run steepserver admin trust status
 uv run steepserver admin trust remove
 ```
 
-Not emulated yet: cloud saves (Connect's "failed to synchronize game save": choose Skip), the friends
-list and the store/news pages of Connect's UI.
+Not emulated yet: storing cloud saves, the friends list and the store/news pages of Connect's UI.
+
+The server's own endpoints: `GET /_steep/status` (connected Connect clients and game sessions) and
+`GET /_steep/ca.pem` (the CA certificate). No authentication yet: meant for a LAN/VPN of friends.
 
 ## Recordings (your data, never committed)
 
@@ -111,8 +116,11 @@ steepserver/
   core/               identity (who logs in), sessions (tickets, live connections, server push), events
   db/                 SQLite, numbered migrations, repositories
   services/           game logic: accounts, economy, stats (progression), entities, matchmaking, seed
-  transport/https/    aiohttp app, UbiServices routes, notification WebSocket, CRL site
-  transport/demux/    Ubisoft Connect's demux protocol (TLS, protobuf, per-service replies)
+  hostnames.py        the Ubisoft hostnames that must resolve to the server
+  trust.py            local CA in Windows' trusted roots (admin CLI + launcher)
+  transport/tls_router.py  one TLS port: demux or HTTPS by requested hostname
+  transport/https/    aiohttp app, UbiServices routes, /_steep/ endpoints, WebSocket, CRL site
+  transport/demux/    Ubisoft Connect's demux protocol (protobuf, per-service replies)
   transport/nex/      PRUDP, secure channel, RMC codec, dispatcher, per-protocol handlers
   plugins/            plugin API + loader
   admin/              CLI

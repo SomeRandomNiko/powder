@@ -9,6 +9,7 @@ PLUGINS = web.AppKey("plugins", Any)            # plugins.loader.PluginManager |
 NEX_PUBLIC_KEY = web.AppKey("nex_public_key", str)
 DATA_DIR = web.AppKey("data_dir", Path)
 FALLBACK = web.AppKey("fallback", Callable)      # recorded-reply handler, usable from routes
+CA_PEM = web.AppKey("ca_pem", Path)              # the local CA certificate (public part) for /_steep/ca.pem
 
 # per-request values
 HOW = web.RequestKey("how", str)                # how the request was answered (access log)

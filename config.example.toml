@@ -3,11 +3,9 @@
 [server]
 bind = "0.0.0.0"
 public_host = "127.0.0.1"   # address the game uses to reach this server (LAN/VPN IP for friends)
-https_port = 443
+https_port = 443           # HTTPS for the game and Ubisoft Connect, incl. Connect's demux (routed by hostname)
 nex_port = 6005
-demux_host = "127.0.0.2"     # Ubisoft Connect demux (hosts maps dmx.upc.ubisoft.com here)
-demux_port = 443
-crl_port = 80               # revocation list for the local CA (127.0.0.1 only)
+crl_port = 80               # revocation list for the local CA (http://public-ubiservices.ubi.com/steep-ca.crl)
 connect_cloud_saves = false # false: Ubisoft Connect treats games as having no cloud saves (no sync prompts)
 data_dir = "data"           # database, logs, uploaded game logs, generated TLS cert + NEX signing key
 recordings_dir = "recordings"   # replies recorded from your own online sessions (personal; gitignored)

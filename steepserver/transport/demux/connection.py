@@ -35,6 +35,7 @@ class DemuxConnection:
         peer = writer.get_extra_info("peername") or ("?", 0)
         self.client_ip, self.peer = peer[0], f"{peer[0]}:{peer[1]}"
         self.profile_id: str | None = None
+        self.player_name: str | None = None
         self.channels: dict[int, str] = {}           # connection id -> service name
         self.next_channel = 1
         self.ctx = ServiceContext(services, None, Counter())
@@ -97,6 +98,7 @@ class DemuxConnection:
         ticket = pb.text(pb.try_decode(token) or [], 3) if isinstance(token, bytes) else ""
         session = self.services.accounts.session_for_ticket(ticket, self.client_ip)
         self.profile_id = session.profile_id if session else None
+        self.player_name = session.player.name if session else None
         self.ctx.profile_id = self.profile_id
         log.info("demux login %s from %s (%s)", session.player.name if session else "REFUSED",
                  self.peer, pb.text(body, 2) or "?")

@@ -16,10 +16,8 @@ PLAYER defaults to the configured default player.
 from __future__ import annotations
 
 import argparse
-import re
-import subprocess
-import sys
 
+from .. import trust as trustmod
 from ..config import Config
 from ..constants import CREDITS_ITEM
 from ..services import Services
@@ -66,38 +64,22 @@ def _grant_args(args) -> None:
         args.player, args.item, args.quantity = None, args.player, int(args.item)
 
 
-def _user_roots() -> str:
-    return subprocess.run(["certutil", "-user", "-store", "Root"], capture_output=True, text=True,
-                          errors="replace").stdout
-
-
-def _thumbprints(store_dump: str) -> set[str]:
-    return {m.replace(" ", "").upper() for m in re.findall(r"Cert Hash\(sha1\): ([0-9a-fA-F ]+)", store_dump)}
-
-
 def trust(action: str, config: Config) -> int:
-    """Ubisoft Connect checks certificates through Windows, so our local CA must be a trusted root.
-    The current user's store is enough (no admin rights); Windows asks for confirmation itself.
-    The CA is name-constrained to the Ubisoft domains, see tls.py."""
-    if sys.platform != "win32":
-        print("only needed on Windows (Ubisoft Connect)")
-        return 1
+    """Ubisoft Connect checks certificates through Windows, so our local CA must be a trusted root
+    (see steepserver/trust.py)."""
     pki = ensure_pki(config.data_dir / "tls")
-    thumb = pki.ca_thumbprint
-    if action == "install":
-        r = subprocess.run(["certutil", "-user", "-addstore", "Root", str(pki.ca_pem)])
-        if r.returncode:
-            print(f"certutil failed ({r.returncode})")
-            return r.returncode
-    elif action == "remove" and thumb in _thumbprints(_user_roots()):
-        r = subprocess.run(["certutil", "-user", "-delstore", "Root", thumb])
-        if r.returncode:
-            print(f"certutil failed ({r.returncode})")
-            return r.returncode
-    dump = _user_roots()
-    print(f"local CA {thumb}: {'TRUSTED' if thumb in _thumbprints(dump) else 'not trusted'} ({pki.ca_pem})")
-    if "CN=mitmproxy" in dump:
-        print("note: a mitmproxy CA is also trusted (capture tooling); remove it when no longer needed")
+    try:
+        if action == "install":
+            trustmod.install(pki.ca_pem)
+        elif action == "remove":
+            trustmod.remove(pki.ca_pem)
+        trusted = trustmod.is_trusted(pki.ca_pem)
+    except trustmod.TrustError as e:
+        print(e)
+        return 1
+    print(f"local CA {pki.ca_thumbprint}: {'TRUSTED' if trusted else 'not trusted'} ({pki.ca_pem})")
+    for other in trustmod.other_tool_roots():
+        print(f"note: a {other} CA is also trusted (capture tooling); remove it when no longer needed")
     return 0
 
 

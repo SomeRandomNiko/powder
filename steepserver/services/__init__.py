@@ -59,6 +59,7 @@ class Services:
     repos: Repos = field(init=False)
     events: EventBus = field(default_factory=EventBus)
     sessions: SessionRegistry = field(default_factory=SessionRegistry)
+    connect_clients: set = field(default_factory=set)     # live Ubisoft Connect demux connections
 
     def __post_init__(self):
         self.repos = Repos(self.db)

@@ -13,9 +13,7 @@ class ServerConfig:
     public_host: str = "127.0.0.1"      # address the game uses to reach us (NEX StationURLs)
     https_port: int = 443
     nex_port: int = 6005
-    demux_host: str = "127.0.0.2"       # Ubisoft Connect's demux (dmx.upc.ubisoft.com; hosts -> this address)
-    demux_port: int = 443
-    crl_port: int = 80                  # plain HTTP on 127.0.0.1: revocation list Ubisoft Connect checks
+    crl_port: int = 80                  # plain HTTP: the local CA's revocation list Ubisoft Connect checks
     connect_cloud_saves: bool = False   # False: tell Ubisoft Connect the games have no cloud saves, so it
                                         # never tries (and fails) to sync them at launch and exit
     data_dir: Path = Path("data")       # steep.db, logs/, TLS cert, NEX key  (relative to the config file)

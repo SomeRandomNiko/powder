@@ -2,16 +2,21 @@
 (with made-up recorded replies)."""
 import asyncio
 import dataclasses
+import json
 import ssl
 
 import pytest
+from aiohttp import web
 
 import synthetic
 from steepserver import tls
 from steepserver.fixtures.demux import DemuxFixtures
 from steepserver.services import Services
+from steepserver.transport import tls_router
 from steepserver.transport.demux import pb
 from steepserver.transport.demux import server as demux_server
+from steepserver.transport.https.app import build_app
+from steepserver.transport.https.keys import CA_PEM
 from steepserver.transport.demux.services import FLAT, NESTED, parse_request, with_request_id
 
 TOKEN = b"made-up-ownership-token"
@@ -69,13 +74,49 @@ def _fixtures() -> DemuxFixtures:
 
 @pytest.fixture
 async def demux(config, assets, tmp_path):
+    """The real listener: one TLS port, demux and HTTPS routed by hostname."""
     services = Services.open(config, dataclasses.replace(assets, demux=_fixtures()))
     services.accounts.player(synthetic.PLAYER)
     pki = tls.ensure_pki(tmp_path / "tls")
-    server = await demux_server.start(services, "127.0.0.1", 0, pki.server_pem)
+    app = build_app(services, nex_public_key="TESTKEY")
+    app[CA_PEM] = pki.ca_pem
+    runner = web.AppRunner(app)
+    await runner.setup()
+    server = await tls_router.start(runner, demux_server.handler(services), "127.0.0.1", 0, pki.server_pem)
     yield services, pki, server.sockets[0].getsockname()[1]
     server.close()
+    await runner.cleanup()
     services.db.close()
+
+
+async def _https_get(pki, port: int, host: str, path: str) -> tuple[int, bytes]:
+    ctx = ssl.create_default_context(cafile=str(pki.ca_pem))
+    reader, writer = await asyncio.open_connection("127.0.0.1", port, ssl=ctx, server_hostname=host)
+    writer.write(f"GET {path} HTTP/1.1\r\nHost: {host}\r\nConnection: close\r\n\r\n".encode())
+    raw = await asyncio.wait_for(reader.read(), 3)
+    writer.close()
+    head, _, body = raw.partition(b"\r\n\r\n")
+    return int(head.split()[1]), body
+
+
+async def test_https_and_demux_share_one_port(demux):
+    services, pki, port = demux
+    status, body = await _https_get(pki, port, "public-ubiservices.ubi.com", "/_steep/status")
+    assert status == 200 and json.loads(body)["connect"] == []
+    status, body = await _https_get(pki, port, "public-ubiservices.ubi.com", "/_steep/ca.pem")
+    assert status == 200 and body == pki.ca_pem.read_bytes()
+
+    ctx = ssl.create_default_context(cafile=str(pki.ca_pem))
+    reader, writer = await asyncio.open_connection("127.0.0.1", port, ssl=ctx, server_hostname="dmx.upc.ubisoft.com")
+    c = Client(reader, writer)
+    try:
+        await c.request(2, 2, [(1, [(3, "any-ticket")]), (2, "uplay_pc")])     # demux login on the same port
+        status, body = await _https_get(pki, port, "public-ubiservices.ubi.com", "/_steep/status")
+        connect = json.loads(body)["connect"]
+        assert [x["player"] for x in connect] == [synthetic.PLAYER_NAME]
+        assert connect[0]["peer"].startswith("127.0.0.1:")                    # peer address kept
+    finally:
+        writer.close()
 
 
 class Client:
