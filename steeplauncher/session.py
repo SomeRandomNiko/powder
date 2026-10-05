@@ -225,7 +225,8 @@ class Session:
         except OSError:
             pass
         os.startfile(f"steam://rungameid/{self.cfg.steam_app_id}")
-        pid = attach.wait_for_real_game(180, stop=self.cancel.is_set)
+        observer = attach.ProcessObserver(log)
+        pid = attach.wait_for_real_game(180, stop=self.cancel.is_set, observer=observer)
         if pid is None:
             self.set("game", FAILED, "Steep did not start")
             return False
@@ -241,6 +242,7 @@ class Session:
         self.set("game", RUNNING, "press any key at the title screen; waiting for the game to go online")
         online = False
         while pid in {p.pid for p in attach.game_processes()}:
+            observer.poll()
             st = server.status(self.cfg)
             if not online and st and st.get("game"):
                 online = True

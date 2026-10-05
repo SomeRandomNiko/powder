@@ -51,9 +51,12 @@ def _k32():
 class GameProcess:
     pid: int
     threads: int
+    parent_pid: int = 0
+    parent_name: str = ""
 
 
-def game_processes(name: str = "Steep.exe") -> list[GameProcess]:
+def _snapshot() -> list[tuple[int, int, int, str]]:
+    """(pid, parent pid, threads, exe name) for every process."""
     k = _k32()
     snap = k.CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0)
     entry = PROCESSENTRY32W()
@@ -61,11 +64,63 @@ def game_processes(name: str = "Steep.exe") -> list[GameProcess]:
     out = []
     ok = k.Process32FirstW(snap, ctypes.byref(entry))
     while ok:
-        if entry.szExeFile.lower() == name.lower():
-            out.append(GameProcess(entry.th32ProcessID, entry.cntThreads))
+        out.append((entry.th32ProcessID, entry.th32ParentProcessID, entry.cntThreads, entry.szExeFile))
         ok = k.Process32NextW(snap, ctypes.byref(entry))
     k.CloseHandle(snap)
     return out
+
+
+def game_processes(name: str = "Steep.exe") -> list[GameProcess]:
+    procs = _snapshot()
+    names = {pid: exe for pid, _, _, exe in procs}
+    return [GameProcess(pid, threads, ppid, names.get(ppid, "?"))
+            for pid, ppid, threads, exe in procs if exe.lower() == name.lower()]
+
+
+def command_line(pid: int) -> str:
+    """The process's command line (NtQueryInformationProcess class 60, Windows 8.1+), or '' if denied."""
+    k = _k32()
+    h = k.OpenProcess(0x1000, False, pid)                     # PROCESS_QUERY_LIMITED_INFORMATION
+    if not h:
+        return ""
+    try:
+        size = ctypes.c_ulong(0)
+        ntdll = ctypes.WinDLL("ntdll")
+        buf = ctypes.create_string_buffer(8192)
+        if ntdll.NtQueryInformationProcess(wintypes.HANDLE(h), 60, buf, len(buf), ctypes.byref(size)) != 0:
+            return ""
+        length = ctypes.c_ushort.from_buffer(buf, 0).value      # UNICODE_STRING.Length (bytes)
+        ptr = ctypes.c_void_p.from_buffer(buf, 8).value          # UNICODE_STRING.Buffer (inside buf)
+        return ctypes.wstring_at(ptr, length // 2) if ptr else ""
+    finally:
+        k.CloseHandle(h)
+
+
+class ProcessObserver:
+    """Logs every Steep.exe once when it appears (parent, threads, command line) and when it exits
+    (lifetime), to learn how to tell the real game from Steam's short-lived starter."""
+    def __init__(self, log):
+        self.log = log
+        self.seen: dict[int, float] = {}
+
+    def poll(self) -> None:
+        now = time.monotonic()
+        current = {p.pid: p for p in game_processes()}
+        for pid, p in current.items():
+            if pid not in self.seen:
+                self.seen[pid] = now
+                self.log.info("game process appeared: pid %d, parent %d (%s), %d threads, cmdline %r",
+                              pid, p.parent_pid, p.parent_name, p.threads, command_line(pid))
+        for pid in [pid for pid in self.seen if pid not in current and self.seen[pid] is not None]:
+            self.log.info("game process exited: pid %d after %.1f s", pid, now - self.seen[pid])
+            self.seen[pid] = None
+        # thread counts change while starting: log the first time each pid crosses the threshold
+        for pid, p in current.items():
+            key = -pid
+            if p.threads >= 20 and key not in self.seen:
+                self.seen[key] = None
+                self.log.info("game process pid %d reached %d threads after %.1f s", pid, p.threads,
+                              now - self.seen[pid])
 
 
 def real_game_pid(min_threads: int = 20) -> int | None:
@@ -121,13 +176,16 @@ def ready() -> str | None:
     return f"missing {', '.join(missing)}: run native\\build.ps1" if missing else None
 
 
-def wait_for_real_game(timeout: float, stop=lambda: False, settle: float = 3.0) -> int | None:
+def wait_for_real_game(timeout: float, stop=lambda: False, settle: float = 3.0,
+                       observer: "ProcessObserver | None" = None) -> int | None:
     """The real game pid once it has been up for `settle` seconds. The thread count already tells the
     real game from Steam's short-lived starter, so a short settle is enough; attaching early matters,
     because the player can press a key at the title screen right away."""
     deadline = time.monotonic() + timeout
     first_seen: dict[int, float] = {}
     while time.monotonic() < deadline and not stop():
+        if observer:
+            observer.poll()
         pid = real_game_pid()
         if pid:
             first_seen.setdefault(pid, time.monotonic())
