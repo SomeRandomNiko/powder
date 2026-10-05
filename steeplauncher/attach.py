@@ -121,8 +121,10 @@ def ready() -> str | None:
     return f"missing {', '.join(missing)}: run native\\build.ps1" if missing else None
 
 
-def wait_for_real_game(timeout: float, stop=lambda: False, settle: float = 12.0) -> int | None:
-    """The real game pid once it has been up for `settle` seconds (stub processes come and go)."""
+def wait_for_real_game(timeout: float, stop=lambda: False, settle: float = 3.0) -> int | None:
+    """The real game pid once it has been up for `settle` seconds. The thread count already tells the
+    real game from Steam's short-lived starter, so a short settle is enough; attaching early matters,
+    because the player can press a key at the title screen right away."""
     deadline = time.monotonic() + timeout
     first_seen: dict[int, float] = {}
     while time.monotonic() < deadline and not stop():
@@ -131,5 +133,5 @@ def wait_for_real_game(timeout: float, stop=lambda: False, settle: float = 12.0)
             first_seen.setdefault(pid, time.monotonic())
             if time.monotonic() - first_seen[pid] >= settle:
                 return pid
-        time.sleep(1)
+        time.sleep(0.25)
     return None

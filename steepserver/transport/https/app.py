@@ -46,7 +46,12 @@ async def log_middleware(request: web.Request, handler):
     how = request.get(HOW, "?")
     size = response.content_length if response.content_length is not None else "-"
     line = f"{request.method} {host_of(request)}{request.path_qs[:160]} -> {how} {response.status} ({size}B)"
-    (log.warning if how == "UNMATCHED" else log.info)(line)
+    if how == "UNMATCHED":
+        log.warning(line)
+    elif path.startswith("/_steep/"):        # the launcher polls these every few seconds
+        log.debug(line)
+    else:
+        log.info(line)
     return response
 
 

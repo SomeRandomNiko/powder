@@ -193,6 +193,14 @@ class Session:
             self.set("connect", OK, f"signed in ({st['connect'][0]['player']})")
             return True
         if connect.running():
+            # it reconnects by itself after a server restart; give it a moment before asking
+            for _ in range(10):
+                self.set("connect", RUNNING, "Ubisoft Connect is running; waiting for it to reconnect")
+                self.wait(2)
+                st = server.status(self.cfg)
+                if connect.logged_in(st):
+                    self.set("connect", OK, f"signed in ({st['connect'][0]['player']})")
+                    return True
             # started before the redirect (or signed in to Ubisoft): it has to restart against our server
             self.ask("connect", "Ubisoft Connect is running but not signed in to this server. It needs a restart.",
                      ["Restart Ubisoft Connect"])
