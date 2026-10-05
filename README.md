@@ -22,14 +22,34 @@ lower a level or wipe an unlock. Every upload is also kept raw in `stat_events`.
 ## Run
 
 ```
-cd server
-uv run steepserver run                  # uses ./config.toml if present (see config.example.toml)
-uv run pytest                           # tests (codecs vs captured bytes, state, HTTPS, NEX over UDP)
+native\build.ps1                        # once: builds the TLS helper (needs zig)
+uv run steep-launcher                   # everything: server, DNS check, certificate, Connect, game
+uv run steepserver run                  # the server alone (uses ./config.toml, see config.example.toml)
+uv run pytest
 ```
 
-The game reaches the server through the hosts file (`tools\redirect.ps1 -On`, self-elevating) and
-accepts our certificate thanks to the in-process hook (`tools\inject.ps1` + `tools\armer.exe`).
-Full live procedure: `notes\SESSION-HANDOFF.md`.
+### Launcher
+
+`steep-launcher` (Windows, runs on the PC with the game; settings in `launcher.toml`, see
+`launcher.example.toml`) walks through these steps when you press **Play**; each step only checks unless
+something is missing:
+
+1. **Game files**: finds Steam, Steep and Ubisoft Connect, and checks that `Steep.exe` is a build the TLS
+   helper supports.
+2. **Server**: reaches it, or starts it locally.
+3. **DNS**: every Ubisoft hostname (`steepserver/hostnames.py`) must resolve to the server address. If not,
+   it shows the lines to add to your hosts file or to your own DNS server, and offers to add them to the
+   hosts file (one UAC prompt; the previous hosts file is backed up to `data/launcher/hosts-backups/`).
+4. **Certificate**: gets the server's CA and, if Windows doesn't trust it yet, explains and installs it
+   for your user.
+5. **Ubisoft Connect**: restarts it if it is not signed in to the server, then waits for its login.
+6. **Steep**: starts it through Steam, attaches the TLS helper (`native/`) and waits until the game is
+   online; when it closes, the launcher cleans up (and stops a server it started).
+
+The TLS helper makes the game accept the server's certificate: `native/hook_guard.dll` traps the game's
+certificate check without changing code bytes at first, `native/armer.exe` keeps that trap armed and then
+patches the check once the game's integrity check is over. It only fits the `Steep.exe` build listed in
+`steeplauncher/game.py`.
 
 Runtime files go to `data/` (`steep.db`, `logs/server.log`, `bodies/` = logs the game uploads,
 `tls/server.pem` and `nex_signing_key.pem`, both generated on first run).

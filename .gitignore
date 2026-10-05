@@ -6,3 +6,5 @@ __pycache__/
 config.toml
 .pytest_cache/
 *.log
+native/bin/
+launcher.toml
