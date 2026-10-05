@@ -34,6 +34,10 @@ async def create_session(request: web.Request) -> web.Response:
     issue our own ticket, which it then sends as `Ubi_v1 t=` and as the NEX LoginWithToken token."""
     services = request.app[SERVICES]
     scheme, value = parse_authorization(request.headers.get("Authorization"))
+    # What the game got from Ubisoft Connect (its platform ticket) says a lot about whether Connect
+    # still works, e.g. with Ubisoft's servers unreachable. Log its shape only, never its content.
+    log.info("login credentials: scheme=%s, ticket %s, app=%s", scheme or "(none)",
+             f"{len(value)} chars" if value else "MISSING", request.headers.get("Ubi-AppId", "(none)"))
     try:
         session = services.accounts.login(LoginRequest(client_ip(request), scheme, value, dict(request.headers)))
     except AuthError as e:
