@@ -1,9 +1,9 @@
-"""PlayerStats2Protocol: statistics live in the database (seeded from the recordings) and the game's
-uploads are applied to them (rules in services/stats.py)."""
+"""PlayerStats2Protocol: statistics live in the database (a new player has none; `admin import` brings
+in recorded ones) and the game's uploads are applied to them (rules in services/stats.py)."""
 from __future__ import annotations
 
 from ....services.stats import StatEvent
-from ..errors import Fallthrough
+from ..errors import RmcError
 from ..rmc_codec import Reader, read_type_map, read_variant
 
 
@@ -12,8 +12,8 @@ def get_statistic_group(ctx, r: Reader) -> bytes:
     outputs: see services/stats.py."""
     read_type_map(r)
     group = r.string()
-    if ctx.profile_id is None:
-        raise Fallthrough()
+    if ctx.profile_id is None:          # not logged in: nobody's statistics
+        raise RmcError("Authentication", 1)
     return ctx.services.stats.group_reply(ctx.profile_id, group)
 
 

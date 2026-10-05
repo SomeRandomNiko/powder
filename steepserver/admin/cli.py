@@ -8,7 +8,8 @@
   steepserver admin events [PLAYER] [-n N]        stat uploads from the game (XP, medals, unlocks)
   steepserver admin scores [PLAYER]               personal best per challenge
   steepserver admin entities [PLAYER]             profile entities (rider card, favorites)
-  steepserver admin reseed [PLAYER]
+  steepserver admin import RECORDINGS_DIR [--replace]   your own recorded progress -> database (once)
+  steepserver admin reset [PLAYER]                start over as a new player
   steepserver admin offers TEXT
   steepserver admin trust (status|install|remove)   local CA in Windows' trusted roots (Ubisoft Connect)
 PLAYER defaults to the configured default player.
@@ -16,6 +17,7 @@ PLAYER defaults to the configured default player.
 from __future__ import annotations
 
 import argparse
+from pathlib import Path
 
 from .. import trust as trustmod
 from ..config import Config
@@ -50,7 +52,10 @@ def add_parser(sub) -> None:
     q.add_argument("player", nargs="?")
     q = a.add_parser("entities", help="profile entities (rider card, favorites)")
     q.add_argument("player", nargs="?")
-    q = a.add_parser("reseed", help="reset a player to the recorded state")
+    q = a.add_parser("import", help="import your own recorded progress into the database (once)")
+    q.add_argument("recordings", type=Path)
+    q.add_argument("--replace", action="store_true", help="overwrite that player if it exists")
+    q = a.add_parser("reset", help="wipe a player: they start again as a new player")
     q.add_argument("player", nargs="?")
     q = a.add_parser("offers", help="search the store catalogue by name")
     q.add_argument("text")
@@ -88,7 +93,8 @@ def run(args, config: Config) -> int:
     if args.admin_cmd == "trust":
         return trust(args.action, config)
     s = Services.open(config)
-    pid = (getattr(args, "player", None) or s.default_player_id()).lower()
+    pid = (getattr(args, "player", None) if args.admin_cmd != "import" else None) or s.default_player_id()
+    pid = pid.lower()
     cmd = args.admin_cmd
 
     if cmd == "players":
@@ -131,9 +137,19 @@ def run(args, config: Config) -> int:
         for e in s.entities.for_profile(pid, limit=1000):
             print(f"{e['entityId']}  {e['type']:20s} rev {e['revision']:<4} {e['lastModified']}  "
                   f"obj keys: {', '.join(list(e.get('obj') or {})[:6])}")
-    elif cmd == "reseed":
-        s.reseed(pid)
-        print(f"reseeded {pid}: {s.economy.credits(pid)} credits, level {s.stats.get(pid, LEVEL_KEY)}")
+    elif cmd == "import":
+        from ..services.importer import ImportError_, import_recordings
+        try:
+            r = import_recordings(s, args.recordings, replace=args.replace)
+        except ImportError_ as e:
+            print(e)
+            s.db.close()
+            return 1
+        print(f"imported {r.name} ({r.profile_id}): {r.items} items, {r.credits} credits, {r.stats} stats, "
+              f"{r.entities} entities; now the default player")
+    elif cmd == "reset":
+        s.reset(pid)
+        print(f"reset {pid}: starts as a new player on the next login")
     elif cmd == "offers":
         text = args.text.lower()
         for o in s.assets.catalog.by_id.values():

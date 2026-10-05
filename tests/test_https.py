@@ -13,7 +13,7 @@ UBI = {"Host": syn.UBI}
 
 
 @pytest.fixture
-async def client(services):
+async def client(services, player):            # the made-up player, imported: the default player
     c = TestClient(TestServer(build_app(services, nex_public_key="TESTKEY")))
     await c.start_server()
     yield c
@@ -105,15 +105,14 @@ async def test_purchase_round_trip(client):
     assert r.status == 404 and (await r.json())["errorCode"]
 
 
-async def test_offers_recorded_page_replayed_and_unseen_query_from_catalogue(client, services):
-    recorded = services.assets.http.lookup("GET", syn.UBI, syn.SKI_PAGE)[0]
+async def test_offers_from_the_pack_catalogue(client, services):
     r = await client.get(syn.SKI_PAGE, headers=UBI)
-    assert await r.read() == recorded.body
+    assert {o["offerId"] for o in (await r.json())["offers"]} == {syn.SKI_A, syn.SKI_B}
     r = await client.get(f"/v1/spaces/{SPACE_ID}/offers?tags=SKI,DELUXE&offset=0&limit=5", headers=UBI)
     assert [o["offerId"] for o in (await r.json())["offers"]] == [syn.SKI_B]
 
 
-async def test_recorded_fallback_and_unmatched(client):
+async def test_pack_fallback_and_unmatched(client):
     r = await client.get(syn.CONFIG_PATH, headers=UBI)
     assert r.status == 200 and await r.json() == {"recorded": True}
     r = await client.get("/v9/nothing/here", headers=UBI)
@@ -131,3 +130,18 @@ async def test_websocket_hello_and_server_push(client, services):
     pushed = json.loads((await ws.receive()).data)
     assert pushed["notificationType"] == "TEST_NOTIFICATION"
     await ws.close()
+
+
+async def test_personal_endpoints_are_generated_not_replayed(client):
+    """Account details, friends and Club actions come from the player record: nothing of the recorded
+    account (email, friends, action progress) is ever served."""
+    me = await (await client.get("/v3/users/me", headers=UBI)).json()
+    assert me["nameOnPlatform"] == syn.PLAYER_NAME and me["email"] is None
+    friends = await (await client.get(f"/v3/profiles/{syn.PLAYER}/friends", headers=UBI)).json()
+    assert friends["friends"] == []
+    assert (await (await client.get("/v2/profiles/me/friends", headers=UBI)).json()) == {"friends": []}
+    actions = (await (await client.get(f"/v1/profiles/{syn.PLAYER}/actions", headers=UBI)).json())["actions"]
+    assert [a["id"] for a in actions] == [syn.ACTION["id"]] and actions[0]["value"] == 0
+    looked_up = await (await client.get(f"/v3/profiles?profileIds={syn.PLAYER},{syn.FRIEND}", headers=UBI)).json()
+    assert [p["profileId"] for p in looked_up["profiles"]] == [syn.PLAYER]     # only players we know
+    assert (await (await client.get("/ugc/v1/?algo=Steep", headers={"Host": "steep-prod-pc.steep.olympus.ubi.com"})).json()) == []

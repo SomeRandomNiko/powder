@@ -1,5 +1,5 @@
 data/
-recordings/
+/recordings
 .venv/
 __pycache__/
 *.pyc
@@ -7,4 +7,6 @@ config.toml
 .pytest_cache/
 *.log
 native/bin/
+/gamedata
+/gamedata.building
 launcher.toml

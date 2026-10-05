@@ -5,9 +5,10 @@ Request pipeline (outermost first):
   cors_middleware     CORS for Ubisoft Connect's web UI (preflights, Allow-Origin)
   plugin_middleware   plugins.before_http hooks may answer a request themselves
   session_middleware  `Authorization: Ubi_v1 t=<ticket>` -> request[SESSION]
-  routes              routes_ubi.py (real logic), websocket.py
-  fallback            recorded reply (assets/fixtures.json) or `{}` + UNMATCHED warning
-Routes match on the path only; the host matters only for the recordings.
+  routes              routes_ubi.py (real logic), routes_profile.py (player-related, generated),
+                      routes_steep.py (/_steep/), websocket.py
+  fallback            game-data pack reply (configs) or `{}` + UNMATCHED warning
+Routes match on the path only; the host matters only for the pack.
 """
 from __future__ import annotations
 
@@ -20,7 +21,7 @@ from aiohttp import web
 from ... import tls
 from ...constants import APP_ID
 from ...core.identity import parse_authorization
-from . import routes_steep, routes_ubi
+from . import routes_profile, routes_steep, routes_ubi
 from .keys import DATA_DIR, FALLBACK, HOW, NEX_PUBLIC_KEY, PLUGINS, SERVICES, SESSION
 from .routes_ubi import client_ip
 from .websocket import websocket
@@ -101,8 +102,8 @@ async def session_middleware(request: web.Request, handler):
 
 
 async def fallback(request: web.Request) -> web.Response:
-    """Recorded reply for anything without real logic. Requests from Ubisoft Connect (any app id other
-    than the game's) try Connect's own recordings first, everything else the game's."""
+    """Game-wide data from the game-data pack for anything without a route. Requests from Ubisoft
+    Connect (any app id other than the game's) try Connect's part of the pack first."""
     assets = request.app[SERVICES].assets
     app_id = request.headers.get("Ubi-AppId", "").lower()
     order = (assets.connect_http, assets.http) if app_id and app_id != APP_ID else (assets.http, assets.connect_http)
@@ -115,7 +116,7 @@ async def fallback(request: web.Request) -> web.Response:
         request[HOW] = "UNMATCHED"
         return web.Response(body=b"{}", headers={"Content-Type": routes_ubi.JSON})
     fixture, tier = hit
-    request[HOW] = f"recorded:{tier}"
+    request[HOW] = f"gamedata:{tier}"
     return web.Response(body=fixture.body, status=fixture.status,
                         headers={"Content-Type": fixture.content_type})
 
@@ -129,6 +130,7 @@ def build_app(services, plugins=None, *, nex_public_key: str = "") -> web.Applic
     app[DATA_DIR] = Path(services.config.data_dir)
     app[FALLBACK] = fallback
     routes_steep.add_routes(app)
+    routes_profile.add_routes(app)
     routes_ubi.add_routes(app)
     app.router.add_get("/v2/websocket", websocket)
     app.router.add_route("*", "/{tail:.*}", fallback)      # last: everything else

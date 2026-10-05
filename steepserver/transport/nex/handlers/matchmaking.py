@@ -1,4 +1,4 @@
-"""MatchmakingProtocol calls that hand out live ids (the rest are answered from recordings)."""
+"""MatchmakingProtocol calls that hand out live ids (acknowledgements without outputs: profile.py)."""
 from __future__ import annotations
 
 from ..rmc_codec import Reader, Writer

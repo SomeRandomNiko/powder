@@ -1,5 +1,6 @@
 """A small, entirely made-up recordings set for the tests (real recordings are personal data and are
-never committed). Same file formats as the real recordings directory."""
+never committed). Same file formats as the real recordings directory. The tests build their game-data
+pack from it with the real builder (conftest.py)."""
 import base64
 import json
 from pathlib import Path
@@ -7,6 +8,7 @@ from pathlib import Path
 from steepserver.constants import APP_ID, CREDITS_ITEM, SPACE_ID
 from steepserver.db.repos import StatRow
 from steepserver.services.stats import encode_stat_group, encode_value
+from steepserver.transport.demux import pb
 
 PLAYER = "00000000-0000-4000-8000-000000000001"
 PLAYER_NAME = "TestPlayer"
@@ -54,6 +56,28 @@ SKI_PAGE = f"/v1/spaces/{SPACE_ID}/offers?tags=SKI&offset=0&limit=100"
 REWARDS_PAGE = f"/v1/spaces/{SPACE_ID}/offers?type=progression&tags=REWARDS&offset=0&limit=100"
 CONFIG_PATH = f"/v2/applications/{APP_ID}/configuration"
 UBI = "public-ubiservices.ubi.com"
+FRIEND_NAME = "SecretFriendName"           # personal: must never reach a pack
+PLAYER_EMAIL = "player@example.invalid"    # personal
+ACTION = {"spaceId": SPACE_ID, "profileId": PLAYER, "id": "1000", "value": 3, "name": "The legend starts here",
+          "xp": 20, "description": "Play", "isBadge": False}
+STEEP_STEAM, STEEP, ADDON, OTHER_GAME = 3279, 3280, 4001, 1234
+
+
+def _product(pid: int, addons=(), cloud: str = "yes") -> bytes:
+    fields = [(1, pid)] + [(16, a) for a in addons]
+    fields.append((17, f"version: 2.0\r\nroot:\r\n  name: l1\r\n  cloud_saves: {cloud}\r\n"))
+    return pb.encode(fields)
+
+
+def _owned_games_reply() -> bytes:
+    products = [_product(STEEP_STEAM, [ADDON]), _product(STEEP, cloud="yes"), _product(ADDON),
+                _product(OTHER_GAME)]                      # OTHER_GAME = rest of the library: stays out
+    return pb.encode([(1, [(1, 1), (2, [(1, 1), (2, [(1, p) for p in products]), (5, 0), (6, 0)])])])
+
+
+def _friends_reply() -> bytes:
+    entry = [(1, 0), (2, [(1, FRIEND), (2, FRIEND_NAME), (3, b""), (4, 0)]), (3, 3)]
+    return pb.encode([(1, [(1, 2), (22, [(1, 1), (2, entry)])])])
 
 
 def _http(method, host, path, body, status=200):
@@ -83,8 +107,22 @@ def build(folder: Path) -> Path:
         _http("GET", UBI, f"/v2/profiles/entities?profileIds={FRIEND}&type=PROFILE&spaceId={SPACE_ID}",
               {"entities": [ENTITIES[FRIEND_CARD]]}),
         _http("PUT", UBI, "/v1/profiles/me/populations/data", {"recorded": "populations"}),
+        _http("GET", UBI, f"/v1/profiles/{PLAYER}/actions?spaceId={SPACE_ID}", {"actions": [ACTION]}),
+        _http("GET", UBI, "/v2/profiles/me/friends", {"friends": [
+            {"pid": FRIEND, "nameOnPlatform": FRIEND_NAME, "state": "Friends", "lastModified": "x"}]}),
     ]
     (folder / "fixtures.json").write_text(json.dumps(http))
+    connect = [
+        _http("GET", UBI, "/v3/users/me", {"userId": PLAYER, "nameOnPlatform": PLAYER_NAME,
+                                           "email": PLAYER_EMAIL}),
+        _http("GET", UBI, f"/v1/spaces/{SPACE_ID}/parameters?parameterGroups=x", {"parameters": {"a": 1}}),
+    ]
+    (folder / "connect-fixtures.json").write_text(json.dumps(connect))
+    demux = {"client_version": 13368,
+             "patch_info": base64.b64encode(pb.encode([(1, 1), (5, 13368)])).decode(),
+             "services": {"ownership_service": {"2": [base64.b64encode(_owned_games_reply()).decode()]},
+                          "friends_service": {"22": [base64.b64encode(_friends_reply()).decode()]}}}
+    (folder / "demux.json").write_text(json.dumps(demux))
 
     stats = [StatRow("level_stat:6:infinite", *encode_value(LEVEL)),
              StatRow("xp_ratio_stat:0:infinite", *encode_value(0.5))]

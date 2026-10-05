@@ -17,9 +17,8 @@ from __future__ import annotations
 
 import asyncio
 import logging
-from collections import Counter
 
-from . import ownership  # noqa: F401  (registers its service handlers)
+from . import generated, ownership  # noqa: F401  (register their service handlers)
 from . import pb
 from .services import ServiceContext, answer
 
@@ -38,8 +37,8 @@ class DemuxConnection:
         self.player_name: str | None = None
         self.channels: dict[int, str] = {}           # connection id -> service name
         self.next_channel = 1
-        self.ctx = ServiceContext(services, None, Counter())
-        self.service_requests = Counter()
+        self.ctx = ServiceContext(services, None)
+        self.client_version = 0
 
     # ---- io ---------------------------------------------------------------------------------------
     async def run(self) -> None:
@@ -83,9 +82,9 @@ class DemuxConnection:
             reply = self.authenticate(body or [])
         elif num == 3:
             reply = self.open_connection(pb.text(body or [], 2))
-        elif num == 5:
-            reply = self.services.assets.demux.patch_info or pb.encode(
-                [(1, 1), (5, self.services.assets.demux.client_version or 0)])
+        elif num == 5:                                  # patch info: "your client is up to date"
+            reply = self.services.assets.products.patch_info or pb.encode(
+                [(1, 1), (3, 0), (5, self.client_version), (6, 0), (7, 0)])
         elif num == 6:
             reply = self.service_request(pb.text(body or [], 1), pb.first(body or [], 2, b""))
         else:
@@ -112,14 +111,17 @@ class DemuxConnection:
         return pb.encode([(1, cid), (2, 1)])
 
     def service_request(self, name: str, data: bytes) -> bytes:
-        nth = self.service_requests[name]
-        self.service_requests[name] += 1
-        recorded = self.services.assets.demux.service_request(name, nth)
-        if recorded is None:
+        """One-off requests outside a service connection: {1 result, 2 data}."""
+        if name == "utility_service":                   # where the player is
+            cfg = self.services.config.server
+            out = pb.encode([(1, [(1, [(1, cfg.country), (2, cfg.region)])])])
+        elif name == "client_configuration_service":   # the client's version, echoed back
+            out = data
+        else:
             log.warning("DEMUX UNHANDLED service request %s (%dB)", name, len(data))
             return pb.encode([(1, 0)])
-        log.info("demux %s: service request %s -> recorded", self.peer, name)
-        return recorded
+        log.info("demux %s: service request %s", self.peer, name)
+        return pb.encode([(1, 1), (2, out)])
 
     async def push(self, push: list) -> None:
         for num, value, _ in push:
@@ -142,7 +144,8 @@ class DemuxConnection:
                 cid = pb.first(pb.decode(value), 1)
                 log.info("demux %s: %s closed by client", self.peer, self.channels.pop(cid, cid))
             elif num == 4:
-                log.info("demux %s: client version %s", self.peer, pb.first(pb.decode(value), 1))
+                self.client_version = pb.first(pb.decode(value), 1, 0)
+                log.info("demux %s: client version %s", self.peer, self.client_version)
             elif num in (6, 7):
                 product = pb.first(pb.decode(value), 1)
                 what = "started" if num == 6 else "ended"

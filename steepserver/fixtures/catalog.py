@@ -1,4 +1,5 @@
-"""Offer catalogue: every offer seen in any recorded GET /v1/spaces/{space}/offers page.
+"""Offer catalogue: the store's offers (game-data pack offers.json; the pack builder collects every offer
+seen in any recorded GET /v1/spaces/{space}/offers page).
 
 Filter semantics, verified against all 44 recorded query families (tests/test_catalog.py):
   tags=A,B   offer has ALL listed tags          type=X   offer.type == X
@@ -9,6 +10,7 @@ offer is +credits (+ item). See services/economy.py.
 from __future__ import annotations
 
 import json
+from pathlib import Path
 
 from .http import HttpFixtures
 
@@ -18,6 +20,12 @@ class OfferCatalog:
         self.by_id: dict[str, dict] = {}
         for o in offers:
             self.by_id.setdefault(o["offerId"], o)
+
+    @classmethod
+    def load(cls, path: Path) -> "OfferCatalog":
+        if not path.exists():
+            return cls([])
+        return cls(json.loads(path.read_text(encoding="utf-8")).get("offers", []))
 
     @classmethod
     def from_fixtures(cls, fixtures: HttpFixtures) -> "OfferCatalog":

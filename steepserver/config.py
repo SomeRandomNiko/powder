@@ -17,7 +17,11 @@ class ServerConfig:
     connect_cloud_saves: bool = False   # False: tell Ubisoft Connect the games have no cloud saves, so it
                                         # never tries (and fails) to sync them at launch and exit
     data_dir: Path = Path("data")       # steep.db, logs/, TLS cert, NEX key  (relative to the config file)
-    recordings_dir: Path = Path("recordings")   # replies recorded from real sessions (personal, never committed)
+    gamedata_dir: Path = Path("gamedata")       # game-data pack (store catalogue, configs), see gamedata/
+    recordings_dir: Path = Path("recordings")   # your own captures: only read by 'gamedata build' and
+                                                # 'admin import', never while the server runs
+    country: str = "US"                 # what Ubisoft Connect is told about the player's location
+    region: str = "NA"
     log_level: str = "INFO"
     strict_tickets: bool = False        # True: reject unknown UbiServices/NEX tickets
 
@@ -63,16 +67,21 @@ class Config:
     def data_dir(self) -> Path:
         return self.server.data_dir
 
+    @property
+    def gamedata_dir(self) -> Path:
+        return self.server.gamedata_dir
+
     @classmethod
     def load(cls, path: Path | None) -> "Config":
         if path is None or not path.exists():
             return cls(server=ServerConfig(data_dir=Path("data").resolve(),
+                                           gamedata_dir=Path("gamedata").resolve(),
                                            recordings_dir=Path("recordings").resolve()), path=path)
         raw = tomllib.loads(path.read_text(encoding="utf-8"))
         base = path.resolve().parent
 
         srv = _build(ServerConfig, raw.get("server", {}))
-        for name in ("data_dir", "recordings_dir"):
+        for name in ("data_dir", "gamedata_dir", "recordings_dir"):
             value = getattr(srv, name)
             if not value.is_absolute():
                 srv = dataclasses.replace(srv, **{name: (base / value).resolve()})

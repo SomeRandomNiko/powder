@@ -6,15 +6,13 @@ two places, and the reply echoes it in the same place:
   nested  {1: {1: request_id, <kind>: request}}      most services
   flat    {1: request_id, <kind>: request}            ach_frontend
 
-`kind` (the field number of the request) says which request it is. Answer order:
-  1. a handler registered for (service, kind)      code, for answers that depend on the player
-  2. the recorded reply for (service, kind)         fixtures/demux.py
-  3. nothing (logged as DEMUX UNHANDLED)
+`kind` (the field number of the request) says which request it is. A handler registered for
+(service, kind) builds the reply (generated.py, ownership.py); anything else gets no reply and is
+logged as DEMUX UNHANDLED.
 """
 from __future__ import annotations
 
 import logging
-from collections import Counter
 from dataclasses import dataclass
 from typing import Callable
 
@@ -101,7 +99,6 @@ def handler(service: str, kind: int):
 class ServiceContext:
     services: object                     # steepserver.services.Services
     profile_id: str | None
-    seen: Counter                        # (service, kind) -> requests answered so far (per connection)
 
 
 def answer(ctx: ServiceContext, service: str, msg: bytes) -> bytes | None:
@@ -110,17 +107,10 @@ def answer(ctx: ServiceContext, service: str, msg: bytes) -> bytes | None:
         log.warning("DEMUX UNPARSED %s message (%dB): %s", service, len(msg), msg[:48].hex())
         return None
     fn = HANDLERS.get((service, req.kind))
-    if fn:
-        out = fn(ctx, req)
-        if out is not None:
-            log.info("demux %s #%d kind %d -> handler (%dB)", service, req.request_id, req.kind, len(out))
-            return out
-    nth = ctx.seen[(service, req.kind)]
-    ctx.seen[(service, req.kind)] += 1
-    recorded = ctx.services.assets.demux.reply(service, req.kind, nth)
-    if recorded is None:
+    out = fn(ctx, req) if fn else None
+    if out is None:
         log.warning("DEMUX UNHANDLED %s #%d kind %d (%dB request): %s", service, req.request_id, req.kind,
                     len(msg), outline(req.body))
         return None
-    log.info("demux %s #%d kind %d -> recorded (%dB)", service, req.request_id, req.kind, len(recorded))
-    return with_request_id(recorded, req.request_id)
+    log.info("demux %s #%d kind %d -> %dB", service, req.request_id, req.kind, len(out))
+    return out

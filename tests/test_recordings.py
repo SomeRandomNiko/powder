@@ -12,20 +12,28 @@ import pytest
 
 from steepserver.config import Config, ServerConfig
 from steepserver.constants import CREDITS_ITEM
+from steepserver.fixtures.http import HttpFixtures
+from steepserver.fixtures.rmc import RmcFixtures
+from steepserver.gamedata.build import build
 from steepserver.services import Assets, Services
+from steepserver.services.importer import import_recordings
 
 RECORDINGS = Path(__file__).resolve().parent.parent / "recordings"
 pytestmark = pytest.mark.skipif(not (RECORDINGS / "fixtures.json").exists(), reason="no local recordings")
 
 
 @pytest.fixture(scope="module")
-def real() -> Assets:
-    return Assets.load(RECORDINGS)
+def real(tmp_path_factory) -> Assets:
+    """A game-data pack built from the real recordings; the build includes the privacy check."""
+    out = tmp_path_factory.mktemp("pack") / "gamedata"
+    report = build(RECORDINGS, out)
+    assert not report.findings, f"privacy check failed: {report.findings[:5]}"
+    return Assets.load(out)
 
 
-def test_catalogue_reproduces_every_recorded_offers_query(real):
+def test_pack_catalogue_reproduces_every_recorded_offers_query(real):
     families = defaultdict(set)
-    for e in real.http.find("GET", r"/v1/spaces/[^/]+/offers$"):
+    for e in HttpFixtures.load(RECORDINGS / "fixtures.json").find("GET", r"/v1/spaces/[^/]+/offers$"):
         q = {k: v[0] for k, v in parse_qs(urlsplit(e.path).query).items()}
         key = tuple(sorted((k, v) for k, v in q.items() if k not in ("offset", "limit")))
         families[key] |= {o["offerId"] for o in json.loads(e.body)["offers"]}
@@ -61,7 +69,7 @@ def test_event_rules_reproduce_every_recorded_stat_change(tmp_path):
     snapshots = [i for i, t in enumerate(timeline) if t[1] == "snapshot"]
     assert len(snapshots) >= 2
     pid = "00000000-0000-4000-8000-0000000000aa"
-    s = Services.open(Config(server=ServerConfig(data_dir=tmp_path, recordings_dir=tmp_path / "none")))
+    s = Services.open(Config(server=ServerConfig(data_dir=tmp_path, gamedata_dir=tmp_path / "none")))
     s.repos.players.create(pid, pid, "replay")
     for a, b in zip(snapshots, snapshots[1:]):
         s.repos.stats.clear(pid)
@@ -76,11 +84,11 @@ def test_event_rules_reproduce_every_recorded_stat_change(tmp_path):
     s.db.close()
 
 
-def test_recorded_player_seeds_and_stats_round_trip(real, tmp_path):
-    s = Services.open(Config(server=ServerConfig(data_dir=tmp_path, recordings_dir=RECORDINGS)), real)
-    pid = s.default_player_id()
-    s.accounts.player(pid)
-    recorded = real.rmc.latest("PlayerStats2Protocol::GetStatisticGroup_V1")
+def test_import_and_stats_round_trip(real, tmp_path):
+    s = Services.open(Config(server=ServerConfig(data_dir=tmp_path)), real)
+    pid = import_recordings(s, RECORDINGS).profile_id
+    assert s.default_player_id() == pid
+    recorded = RmcFixtures.load(RECORDINGS / "fixtures-rmc.json").latest("PlayerStats2Protocol::GetStatisticGroup_V1")
     if recorded:
         assert s.stats.group_reply(pid, "player_profile") == recorded
     shop = next((o for o in real.catalog.by_id.values() if o.get("type") == "shop"), None)

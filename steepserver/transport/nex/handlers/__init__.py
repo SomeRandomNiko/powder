@@ -2,8 +2,8 @@
 
 A handler is fn(ctx: NexContext, params: Reader) -> output bytes. Add a module here and list it below.
 """
-from . import gamestorage, login, matchmaking, stats
+from . import gamestorage, login, matchmaking, profile, stats
 
 HANDLERS = {}
-for _module in (login, gamestorage, stats, matchmaking):
+for _module in (login, gamestorage, stats, matchmaking, profile):
     HANDLERS.update(_module.HANDLERS)

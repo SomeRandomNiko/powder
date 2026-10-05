@@ -1,6 +1,8 @@
 """Game logic. Transports, the admin CLI and plugins all go through a Services instance."""
 from __future__ import annotations
 
+import json
+import logging
 import uuid
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -11,44 +13,53 @@ from ..core.sessions import SessionRegistry
 from ..db.database import Database
 from ..db.repos import Repos
 from ..fixtures.catalog import OfferCatalog
-from ..fixtures.demux import DemuxFixtures
 from ..fixtures.http import HttpFixtures
 from ..fixtures.rmc import RmcFixtures
+from ..gamedata import pack
 from .accounts import AccountService
 from .economy import EconomyService
 from .entities import EntityService
 from .matchmaking import MatchmakingService
-from .seed import captured_session, seed_player
+from .seed import create_player
 from .stats import StatsService
+
+log = logging.getLogger("steep")
 
 
 @dataclass
 class Assets:
-    """Read-only replies recorded from real sessions (the recordings directory; personal data,
-    kept out of version control). Every part is optional: without recordings the server still runs,
-    it just has nothing to replay."""
-    http: HttpFixtures
-    rmc: RmcFixtures
-    catalog: OfferCatalog
-    inventory_updates: Path | None = None
-    recorded_profile_id: str | None = None       # whose account the recordings are from
-    connect_http: HttpFixtures = field(default_factory=lambda: HttpFixtures([]))   # Ubisoft Connect's
-    demux: DemuxFixtures = field(default_factory=DemuxFixtures)                     # own traffic
+    """The game-data pack (gamedata_dir): non-personal server data the game needs, read-only. Every
+    part is optional: without a pack the server runs, but the store is empty and configs are missing."""
+    http: HttpFixtures = field(default_factory=lambda: HttpFixtures([]))
+    rmc: RmcFixtures = field(default_factory=lambda: RmcFixtures({}))
+    catalog: OfferCatalog = field(default_factory=lambda: OfferCatalog([]))
+    actions: list[dict] = field(default_factory=list)                    # Ubisoft Club action definitions
+    connect_http: HttpFixtures = field(default_factory=lambda: HttpFixtures([]))
+    products: pack.ConnectProducts = field(default_factory=pack.ConnectProducts)
+    manifest: dict | None = None
 
     @classmethod
-    def load(cls, recordings_dir: Path) -> "Assets":
-        http = HttpFixtures.load(recordings_dir / "fixtures.json")
-        session = captured_session(http)
-        return cls(http=http, rmc=RmcFixtures.load(recordings_dir / "fixtures-rmc.json"),
-                   catalog=OfferCatalog.from_fixtures(http),
-                   inventory_updates=recordings_dir / "inventory-updates.json",
-                   recorded_profile_id=(session or {}).get("profileId", "").lower() or None,
-                   connect_http=HttpFixtures.load(recordings_dir / "connect-fixtures.json"),
-                   demux=DemuxFixtures.load(recordings_dir / "demux.json"))
+    def load(cls, root: Path) -> "Assets":
+        try:
+            manifest = pack.read_manifest(root)
+        except pack.PackError as e:
+            log.warning("%s", e)
+            return cls()
+        changed = pack.verify_files(root, manifest)
+        if changed:
+            log.warning("game-data pack files changed since it was built: %s", ", ".join(changed))
+        actions_path = root / "actions.json"
+        return cls(http=HttpFixtures.load(root / "http.json"), rmc=RmcFixtures.load(root / "rmc.json"),
+                   catalog=OfferCatalog.load(root / "offers.json"),
+                   actions=json.loads(actions_path.read_text(encoding="utf-8")).get("actions", [])
+                   if actions_path.exists() else [],
+                   connect_http=HttpFixtures.load(root / "connect" / "http.json"),
+                   products=pack.ConnectProducts.load(root / "connect" / "demux.json"),
+                   manifest=manifest)
 
     @property
     def empty(self) -> bool:
-        return not self.http.entries and not self.rmc.data
+        return self.manifest is None
 
 
 @dataclass
@@ -67,36 +78,32 @@ class Services:
                                        self.default_player_id)
         self.economy = EconomyService(self.config, self.repos, self.assets.catalog, self.events)
         self.stats = StatsService(self.repos)
-        self.entities = EntityService(self.repos, self.assets.http)
+        self.entities = EntityService(self.repos)
         self.matchmaking = MatchmakingService()
 
     def default_player_id(self) -> str:
-        """Configured default, else the recorded account, else a local id created once and kept."""
+        """Configured default, else the one stored (imported or created once) and kept. A database from
+        before this was stored keeps its existing player (the first one created)."""
         if self.config.players.default:
             return self.config.players.default.lower()
-        if self.assets.recorded_profile_id:
-            return self.assets.recorded_profile_id
         pid = self.repos.kv.get("server", "default_player")
         if pid is None:
-            pid = str(uuid.uuid4())
+            existing = sorted(self.repos.players.all(), key=lambda p: p.created_at)
+            pid = existing[0].profile_id if existing else str(uuid.uuid4())
             self.repos.kv.set("server", "default_player", pid)
         return pid
 
     def seed(self, profile_id: str) -> None:
-        seed_player(profile_id, config=self.config, repos=self.repos, http=self.assets.http,
-                    rmc=self.assets.rmc, updates_file=self.assets.inventory_updates,
-                    recorded_profile_id=self.assets.recorded_profile_id)
+        create_player(profile_id, config=self.config, repos=self.repos)
 
-    def reseed(self, profile_id: str) -> None:
-        """Wipe a player and recreate them from the recorded data."""
+    def reset(self, profile_id: str) -> None:
+        """Wipe a player; they start again as a new player on their next login."""
         with self.db.transaction():
             self.repos.players.delete(profile_id)
             self.repos.entities.clear(profile_id)
-            self.repos.kv.set(profile_id.lower(), "entities_seeded", False)
-            self.seed(profile_id)
 
     @classmethod
     def open(cls, config: Config, assets: Assets | None = None) -> "Services":
         db = Database(config.data_dir / "steep.db")
         db.migrate()
-        return cls(config=config, db=db, assets=assets or Assets.load(config.server.recordings_dir))
+        return cls(config=config, db=db, assets=assets or Assets.load(config.gamedata_dir))

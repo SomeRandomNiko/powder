@@ -1,19 +1,21 @@
-"""UbiServices endpoints with real logic. Everything else is served from recordings (app.py fallback)."""
+"""UbiServices endpoints with real logic (login, inventory, store, entities). Player-related endpoints
+that only need a plausible answer are in routes_profile.py; game-wide data comes from the game-data
+pack (app.py fallback)."""
 from __future__ import annotations
 
 import json
 import logging
+import secrets
 
 from aiohttp import web
 
-from ...constants import APP_ID, SPACE_ID
+from ...constants import APP_ID, CONNECT_SPACE_ID, SPACE_ID
 from ...core.sessions import ubi_shaped_ticket
 from ...core.identity import LoginRequest, parse_authorization
 from ...services.accounts import AuthError
 from ...services.economy import EconomyError
-from ...services.seed import captured_session
 from ...util import iso_now
-from .keys import FALLBACK, HOW, NEX_PUBLIC_KEY, SERVICES, SESSION
+from .keys import HOW, NEX_PUBLIC_KEY, SERVICES, SESSION
 
 log = logging.getLogger("steep.https")
 JSON = "application/json; charset=utf-8"
@@ -50,20 +52,18 @@ async def create_session(request: web.Request) -> web.Response:
     p = session.player
     app_id = request.headers.get("Ubi-AppId", "").lower()
     connect = bool(app_id) and app_id != APP_ID
+    body = {"platformType": "uplay", "environment": "Prod", "profileId": p.profile_id, "userId": p.user_id,
+            "nameOnPlatform": p.name, "ticket": session.ticket, "sessionId": session.session_id,
+            "sessionKey": secrets.token_urlsafe(48), "expiration": iso_now(3 * 3600), "serverTime": iso_now(),
+            "clientIp": session.client_ip, "clientIpCountry": services.config.server.country,
+            "twoFactorAuthenticationTicket": None}
     if connect:
-        # Ubisoft Connect (any other app id): its own reply shape. It keeps the remember-me ticket
-        # and signs in with it next time (`rm_v1`), which we accept like any other credential.
-        body = dict(captured_session(services.assets.connect_http) or {"platformType": "uplay",
-                                                                       "environment": "Prod"})
-        body.update(rememberMeTicket=ubi_shaped_ticket(app_id, session.session_id),
-                    twoFactorAuthenticationTicket=None)
+        # Ubisoft Connect (any other app id) keeps the remember-me ticket and signs in with it next time
+        # (`rm_v1`), which we accept like any other credential.
+        body.update(spaceId=CONNECT_SPACE_ID, rememberMeTicket=ubi_shaped_ticket(app_id, session.session_id),
+                    codeGenerationPreference=None, maskedPhone=None)
     else:
-        body = dict(captured_session(services.assets.http) or {"platformType": "uplay", "environment": "Prod",
-                                                                 "sessionKey": "", "rememberMeTicket": None})
-        body["spaceId"] = SPACE_ID
-    body.update(profileId=p.profile_id, userId=p.user_id, nameOnPlatform=p.name,
-                ticket=session.ticket, sessionId=session.session_id, expiration=iso_now(3 * 3600),
-                serverTime=iso_now(), clientIp=session.client_ip)
+        body.update(spaceId=SPACE_ID, rememberMeTicket=None)
     await services.events.emit("login", session=session)
     return json_response(request, body, "login")
 
@@ -89,8 +89,8 @@ def _known_player(request: web.Request) -> str | None:
 
 async def get_inventory(request: web.Request) -> web.StreamResponse:
     pid = _known_player(request)
-    if pid is None:                       # someone we have no record of -> recorded reply, if any
-        return await request.app[FALLBACK](request)
+    if pid is None:                       # someone this server has no record of: owns nothing
+        return json_response(request, {"items": []}, "inventory(unknown player)")
     return json_response(request, request.app[SERVICES].economy.inventory_reply(pid), "inventory")
 
 
@@ -116,11 +116,8 @@ async def post_inventory(request: web.Request) -> web.Response:
 
 
 async def get_offers(request: web.Request) -> web.StreamResponse:
-    """Store catalogue. The exact recorded page if we have it, else filtered from the catalogue."""
+    """Store catalogue, filtered like the real service (see fixtures/catalog.py)."""
     services = request.app[SERVICES]
-    hit = services.assets.http.lookup("GET", request.host.split(":")[0], request.path_qs)
-    if hit:
-        return await request.app[FALLBACK](request)
     q = request.query
     offers = services.assets.catalog.query(tags=q.get("tags"), type=q.get("type"), item_ids=q.get("itemIds"),
                                            offset=int(q.get("offset", 0)), limit=int(q.get("limit", 100)))
@@ -140,8 +137,6 @@ async def get_profile_entities(request: web.Request) -> web.StreamResponse:
     entities = request.app[SERVICES].entities
     pid = request.match_info["profile_id"]
     q = request.query
-    if not entities.is_local(pid):
-        return await request.app[FALLBACK](request)
     items = entities.for_profile(pid, q.get("type"), q.get("tags"), _int(q, "offset", 0), _int(q, "limit", 100))
     return json_response(request, {"entities": items}, f"entities({len(items)})")
 
@@ -150,8 +145,6 @@ async def get_entities_batch(request: web.Request) -> web.StreamResponse:
     """GET /v2/profiles/entities?profileIds=a,b&type=PROFILE (rider cards of friends and self)."""
     q = request.query
     ids = [p for p in q.get("profileIds", "").split(",") if p]
-    if not ids:
-        return await request.app[FALLBACK](request)
     items = request.app[SERVICES].entities.for_profiles(ids, q.get("type"), _int(q, "offset", 0),
                                                          _int(q, "limit", 100))
     return json_response(request, {"entities": items}, f"entities({len(items)})")
@@ -164,7 +157,10 @@ def _owner(request: web.Request) -> str | None:
 
 async def get_entity(request: web.Request) -> web.StreamResponse:
     e = request.app[SERVICES].entities.get(request.match_info["entity_id"])
-    return json_response(request, e, "entity") if e else await request.app[FALLBACK](request)
+    if e is None:
+        return json_response(request, {"errorCode": 1002, "message": "entity not found", "httpCode": 404},
+                             "entity-missing", 404)
+    return json_response(request, e, "entity")
 
 
 async def put_entity(request: web.Request) -> web.Response:
@@ -190,17 +186,6 @@ async def delete_entity(request: web.Request) -> web.Response:
     return json_response(request, {}, "entity-deleted" if deleted else "entity-absent")
 
 
-async def put_populations_data(request: web.Request) -> web.StreamResponse:
-    """Keep what the game reports about the player's populations; answer like the recording."""
-    session = request.get(SESSION)
-    if session and request.can_read_body:
-        try:
-            request.app[SERVICES].repos.kv.set(session.profile_id, "populations_data", await request.json())
-        except ValueError:
-            pass
-    return await request.app[FALLBACK](request)
-
-
 # ---- Ubisoft Connect ----------------------------------------------------------------------------------
 async def internet_check(request: web.Request) -> web.Response:
     """static3.cdn.ubi.com/.../test_internet.txt: Ubisoft Connect shows "no internet connection" unless
@@ -215,7 +200,7 @@ async def get_entities_v1(request: web.Request) -> web.StreamResponse:
     recorded metadata would make Connect offer to "restore" a save it can never download."""
     if request.query.get("name", "").startswith("upcCloudSave"):
         return json_response(request, {"entities": []}, "no-cloud-save")
-    return await request.app[FALLBACK](request)
+    return json_response(request, {"entities": []}, "entities-v1")
 
 
 def add_routes(app: web.Application) -> None:
@@ -232,4 +217,3 @@ def add_routes(app: web.Application) -> None:
     app.router.add_put("/v2/profiles/entities/{entity_id}", put_entity)
     app.router.add_delete("/v2/profiles/entities/{entity_id}", delete_entity)
     app.router.add_get("/v2/profiles/{profile_id}/entities", get_profile_entities)
-    app.router.add_put("/v1/profiles/me/populations/data", put_populations_data)

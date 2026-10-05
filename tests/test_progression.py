@@ -3,6 +3,7 @@ import pytest
 from aiohttp.test_utils import TestClient, TestServer
 
 import synthetic as syn
+from steepserver.services.importer import import_recordings
 from steepserver.config import Config, ServerConfig
 from steepserver.db.database import MIGRATIONS_DIR, Database, _split_sql
 from steepserver.services import Services
@@ -121,7 +122,7 @@ async def test_entities_over_https(services, player):
                                          json={})).json()
         auth = {**hdr, "Authorization": f"Ubi_v1 t={login['ticket']}"}
 
-        # own rider card: seeded from the recording, then changed by the game and read back
+        # own rider card: imported from the recording, then changed by the game and read back
         own = (await (await client.get(f"/v2/profiles/{player}/entities?type=PROFILE", headers=auth)).json())["entities"]
         assert [e["entityId"] for e in own] == [syn.CARD]
         r = await client.put(f"/v2/profiles/entities/{syn.CARD}", headers=auth,
@@ -129,10 +130,10 @@ async def test_entities_over_https(services, player):
         saved = await r.json()
         assert saved["revision"] == 4 and saved["obj"]["RIDER_CARD"]["title"] == 99 and saved["profileId"] == player
 
-        # batch: own card from the DB + friend's from the recordings, for a combination never recorded
+        # batch: own card from the DB; a player this server does not know has none (no recordings)
         r = await client.get(f"/v2/profiles/entities?profileIds={player},{syn.FRIEND}&type=PROFILE", headers=auth)
         cards = {e["profileId"]: e["obj"]["RIDER_CARD"]["title"] for e in (await r.json())["entities"]}
-        assert cards == {player: 99, syn.FRIEND: 2}
+        assert cards == {player: 99}
 
         # favorites: create and delete
         fav = await (await client.post("/v2/profiles/entities", headers=auth,
@@ -143,21 +144,21 @@ async def test_entities_over_https(services, player):
         await client.delete(f"/v2/profiles/entities/{fav['entityId']}", headers=auth)
         assert services.repos.entities.get(fav["entityId"]) is None
 
-        # populations data is kept, reply as recorded
+        # populations data is kept and echoed
         r = await client.put("/v1/profiles/me/populations/data", headers=auth, json={"populations": [1]})
-        assert await r.json() == {"recorded": "populations"}
+        assert await r.json() == {"populations": [1]}
         assert services.repos.kv.get(player, "populations_data") == {"populations": [1]}
     finally:
         await client.close()
 
 
-def test_entities_persist_and_survive_reseed_reset(make_services, config):
+def test_entities_persist_and_reimport_restores_them(make_services, config, recordings_dir):
     s = make_services()
-    s.accounts.player(syn.PLAYER)
+    import_recordings(s, recordings_dir)
     s.entities.put(syn.CARD, {"obj": {"RIDER_CARD": {"title": 5}}}, syn.PLAYER)
     s.db.close()
     s2 = Services.open(config, s.assets)
     assert s2.entities.get(syn.CARD)["obj"]["RIDER_CARD"]["title"] == 5
-    s2.reseed(syn.PLAYER)
+    import_recordings(s2, recordings_dir, replace=True)
     assert s2.entities.for_profile(syn.PLAYER)[0]["obj"]["RIDER_CARD"]["title"] == 1     # recorded again
     s2.db.close()

@@ -1,10 +1,11 @@
-"""Catalogue, seeding, stats and economy (against the synthetic recordings)."""
+"""Catalogue (from the made-up game-data pack), new players, import, stats and economy."""
 import pytest
 
 import synthetic as syn
 from steepserver.constants import CREDITS_ITEM
 from steepserver.services import Services
 from steepserver.services.economy import EconomyError
+from steepserver.services.importer import ImportError_, import_recordings
 from steepserver.services.stats import LEVEL_KEY
 
 
@@ -17,25 +18,26 @@ def test_catalog_filters(assets):
     assert len(assets.catalog.query(tags="SKI", offset=1, limit=1)) == 1
 
 
-def test_default_player_is_the_recorded_account(services):
+def test_import_makes_the_recorded_player_the_default(services, player):
     assert services.default_player_id() == syn.PLAYER
 
 
-def test_seed_from_recordings(services, player):
+def test_import_from_recordings(services, player):
     assert services.repos.players.get(player).name == syn.PLAYER_NAME
     assert services.stats.get(player, LEVEL_KEY) == syn.LEVEL
     assert services.economy.credits(player) == syn.SEEDED_CREDITS                  # snapshot + update
     assert services.repos.inventory.quantity(player, syn.BADGE_ITEM) == 1
 
 
-def test_stat_group_reply_is_byte_identical_to_recording(services, player, assets):
-    recorded = assets.rmc.latest("PlayerStats2Protocol::GetStatisticGroup_V1")
+def test_stat_group_reply_is_byte_identical_to_recording(services, player, recordings_dir):
+    from steepserver.fixtures.rmc import RmcFixtures
+    recorded = RmcFixtures.load(recordings_dir / "fixtures-rmc.json").latest("PlayerStats2Protocol::GetStatisticGroup_V1")
     assert services.stats.group_reply(player, "player_profile") == recorded
 
 
-def test_purchase_deducts_credits_adds_item_and_persists(make_services, config):
+def test_purchase_deducts_credits_adds_item_and_persists(make_services, config, recordings_dir):
     s = make_services()
-    s.accounts.player(syn.PLAYER)
+    import_recordings(s, recordings_dir)
     reply, _ = s.economy.apply_offer(syn.PLAYER, syn.SKI_A, 6)
     credits = next(i for i in reply["items"] if i["itemId"] == CREDITS_ITEM)
     after = syn.SEEDED_CREDITS - syn.SKI_A_PRICE
@@ -71,9 +73,9 @@ def test_unknown_offer_is_404(services, player):
     assert e.value.status == 404
 
 
-def test_toggles_free_purchases_and_reward_multiplier(make_services):
+def test_toggles_free_purchases_and_reward_multiplier(make_services, recordings_dir):
     s = make_services(free_purchases=True, reward_credit_multiplier=2.0)
-    s.accounts.player(syn.PLAYER)
+    import_recordings(s, recordings_dir)
     s.economy.apply_offer(syn.PLAYER, syn.SKI_A)
     assert s.economy.credits(syn.PLAYER) == syn.SEEDED_CREDITS
     s.economy.apply_offer(syn.PLAYER, syn.REWARD)
@@ -87,9 +89,18 @@ def test_new_player_starts_empty_with_starting_credits(make_services):
     assert s.stats.group(p.profile_id, "player_profile") == []
 
 
-def test_without_recordings_a_local_default_player_is_created_once(tmp_path):
+def test_new_player_by_default_and_never_from_recordings(services):
+    """Without an import, logging in creates a new player, even with recordings lying around."""
+    pid = services.default_player_id()
+    assert pid != syn.PLAYER
+    p = services.accounts.player(pid)
+    assert p.name.startswith("Player-") and services.economy.credits(pid) == 0
+    assert services.stats.group(pid, "player_profile") == []
+
+
+def test_without_a_pack_a_local_default_player_is_created_once(tmp_path):
     from steepserver.config import Config, ServerConfig
-    cfg = Config(server=ServerConfig(data_dir=tmp_path / "d", recordings_dir=tmp_path / "none"))
+    cfg = Config(server=ServerConfig(data_dir=tmp_path / "d", gamedata_dir=tmp_path / "none"))
     s = Services.open(cfg)
     first = s.default_player_id()
     assert s.assets.empty and s.default_player_id() == first
@@ -97,7 +108,15 @@ def test_without_recordings_a_local_default_player_is_created_once(tmp_path):
     assert Services.open(cfg).default_player_id() == first       # kept across restarts
 
 
-def test_reseed_restores_recorded_state(services, player):
+def test_reimport_with_replace_restores_recorded_state(services, player, recordings_dir):
     services.economy.apply_offer(player, syn.SKI_A)
-    services.reseed(player)
+    with pytest.raises(ImportError_):
+        import_recordings(services, recordings_dir)                 # exists: refused without --replace
+    import_recordings(services, recordings_dir, replace=True)
     assert services.economy.credits(player) == syn.SEEDED_CREDITS
+
+
+def test_reset_starts_over_as_a_new_player(services, player):
+    services.reset(player)
+    assert services.accounts.player(player).name.startswith("Player-")
+    assert services.economy.credits(player) == 0

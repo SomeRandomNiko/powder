@@ -33,11 +33,14 @@ async def run(config: Config) -> None:
     cfg = config.server
     services = Services.open(config)
     log.info("data: %s (schema v%d)", config.data_dir, services.db.version())
-    log.info("recordings: %s (%d HTTPS replies, %d NEX methods, %d offers; Ubisoft Connect: %d HTTPS, "
-             "%d demux)", cfg.recordings_dir, len(services.assets.http.entries), len(services.assets.rmc.data),
-             len(services.assets.catalog), len(services.assets.connect_http.entries), len(services.assets.demux))
-    if services.assets.empty:
-        log.warning("no recordings found - the game will get empty replies for everything not implemented")
+    a = services.assets
+    if a.empty:
+        log.warning("no game-data pack at %s: the store is empty and game configs are missing "
+                    "(build one: steepserver gamedata build <recordings> %s)", config.gamedata_dir, config.gamedata_dir)
+    else:
+        log.info("game data: %s (built %s: %d offers, %d game replies, %d Ubisoft Connect replies, %d products)",
+                 config.gamedata_dir, a.manifest.get("built"), len(a.catalog), len(a.http.entries),
+                 len(a.connect_http.entries), len(a.products.products))
 
     plugins = PluginManager(services)
     plugins.load_dir(plugins_dir(config))
