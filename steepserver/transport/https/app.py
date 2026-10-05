@@ -17,6 +17,7 @@ from pathlib import Path
 
 from aiohttp import web
 
+from ... import tls
 from ...core.identity import parse_authorization
 from . import routes_ubi
 from .keys import DATA_DIR, FALLBACK, HOW, NEX_PUBLIC_KEY, PLUGINS, SERVICES, SESSION
@@ -97,6 +98,19 @@ def tls_context(cert_file: Path) -> ssl.SSLContext:
     ctx = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
     ctx.load_cert_chain(str(cert_file))
     return ctx
+
+
+async def start_crl(crl, port: int) -> web.AppRunner:
+    """Plain HTTP on 127.0.0.1: the local CA's revocation list (Windows checks it for Ubisoft Connect).
+    `crl` is a callable returning the DER bytes."""
+    async def serve(request: web.Request) -> web.Response:
+        return web.Response(body=crl(), content_type="application/pkix-crl")
+    app = web.Application()
+    app.router.add_get(tls.CRL_PATH, serve)
+    runner = web.AppRunner(app, access_log=None)
+    await runner.setup()
+    await web.TCPSite(runner, "127.0.0.1", port).start()
+    return runner
 
 
 async def start(app: web.Application, bind: str, port: int, cert_file: Path | None) -> web.AppRunner:

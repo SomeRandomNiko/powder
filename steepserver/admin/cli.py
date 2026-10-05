@@ -10,16 +10,21 @@
   steepserver admin entities [PLAYER]             profile entities (rider card, favorites)
   steepserver admin reseed [PLAYER]
   steepserver admin offers TEXT
+  steepserver admin trust (status|install|remove)   local CA in Windows' trusted roots (Ubisoft Connect)
 PLAYER defaults to the configured default player.
 """
 from __future__ import annotations
 
 import argparse
+import re
+import subprocess
+import sys
 
 from ..config import Config
 from ..constants import CREDITS_ITEM
 from ..services import Services
 from ..services.stats import LEVEL_KEY, stat_value
+from ..tls import ensure_pki
 
 
 def add_parser(sub) -> None:
@@ -51,6 +56,8 @@ def add_parser(sub) -> None:
     q.add_argument("player", nargs="?")
     q = a.add_parser("offers", help="search the store catalogue by name")
     q.add_argument("text")
+    q = a.add_parser("trust", help="the local CA in Windows' trusted roots (needed by Ubisoft Connect)")
+    q.add_argument("action", choices=("status", "install", "remove"))
 
 
 def _grant_args(args) -> None:
@@ -59,8 +66,45 @@ def _grant_args(args) -> None:
         args.player, args.item, args.quantity = None, args.player, int(args.item)
 
 
+def _user_roots() -> str:
+    return subprocess.run(["certutil", "-user", "-store", "Root"], capture_output=True, text=True,
+                          errors="replace").stdout
+
+
+def _thumbprints(store_dump: str) -> set[str]:
+    return {m.replace(" ", "").upper() for m in re.findall(r"Cert Hash\(sha1\): ([0-9a-fA-F ]+)", store_dump)}
+
+
+def trust(action: str, config: Config) -> int:
+    """Ubisoft Connect checks certificates through Windows, so our local CA must be a trusted root.
+    The current user's store is enough (no admin rights); Windows asks for confirmation itself.
+    The CA is name-constrained to the Ubisoft domains, see tls.py."""
+    if sys.platform != "win32":
+        print("only needed on Windows (Ubisoft Connect)")
+        return 1
+    pki = ensure_pki(config.data_dir / "tls")
+    thumb = pki.ca_thumbprint
+    if action == "install":
+        r = subprocess.run(["certutil", "-user", "-addstore", "Root", str(pki.ca_pem)])
+        if r.returncode:
+            print(f"certutil failed ({r.returncode})")
+            return r.returncode
+    elif action == "remove" and thumb in _thumbprints(_user_roots()):
+        r = subprocess.run(["certutil", "-user", "-delstore", "Root", thumb])
+        if r.returncode:
+            print(f"certutil failed ({r.returncode})")
+            return r.returncode
+    dump = _user_roots()
+    print(f"local CA {thumb}: {'TRUSTED' if thumb in _thumbprints(dump) else 'not trusted'} ({pki.ca_pem})")
+    if "CN=mitmproxy" in dump:
+        print("note: a mitmproxy CA is also trusted (capture tooling); remove it when no longer needed")
+    return 0
+
+
 def run(args, config: Config) -> int:
     _grant_args(args)
+    if args.admin_cmd == "trust":
+        return trust(args.action, config)
     s = Services.open(config)
     pid = (getattr(args, "player", None) or s.default_player_id()).lower()
     cmd = args.admin_cmd

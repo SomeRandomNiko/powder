@@ -40,9 +40,16 @@ async def run(config: Config) -> None:
     public_key = secure.config_public_key(signing_key)
 
     app = https_app.build_app(services, plugins, nex_public_key=public_key)
-    cert = tls.ensure_certificate(config.data_dir / "tls" / "server.pem")
-    runner = await https_app.start(app, cfg.bind, cfg.https_port, cert)
+    pki = tls.ensure_pki(config.data_dir / "tls")
+    runner = await https_app.start(app, cfg.bind, cfg.https_port, pki.server_pem)
     log.info("HTTPS listening on %s:%d", cfg.bind, cfg.https_port)
+    crl_runner = None
+    try:
+        crl_runner = await https_app.start_crl(pki.crl, cfg.crl_port)
+        log.info("CRL on http://127.0.0.1:%d%s (local CA %s)", cfg.crl_port, tls.CRL_PATH, pki.ca_thumbprint)
+    except OSError as e:
+        log.warning("cannot serve the CRL on 127.0.0.1:%d (%s): Ubisoft Connect will reject our "
+                    "certificate", cfg.crl_port, e)
 
     dispatcher = RmcDispatcher(services, plugins)
     nex, transport = await nex_server.start(services, dispatcher, signing_key, cfg.bind, cfg.public_host,
@@ -53,6 +60,8 @@ async def run(config: Config) -> None:
     finally:
         transport.close()
         await runner.cleanup()
+        if crl_runner:
+            await crl_runner.cleanup()
         services.db.close()
         log.info("stopped")
 
