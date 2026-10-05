@@ -193,15 +193,8 @@ class Session:
             self.set("connect", OK, f"signed in ({st['connect'][0]['player']})")
             return True
         if connect.running():
-            # it reconnects by itself after a server restart; give it a moment before asking
-            for _ in range(10):
-                self.set("connect", RUNNING, "Ubisoft Connect is running; waiting for it to reconnect")
-                self.wait(2)
-                st = server.status(self.cfg)
-                if connect.logged_in(st):
-                    self.set("connect", OK, f"signed in ({st['connect'][0]['player']})")
-                    return True
-            # started before the redirect (or signed in to Ubisoft): it has to restart against our server
+            # started before the redirect, signed in to Ubisoft, or connected to a server that has since
+            # stopped (it does not reconnect by itself): it has to restart against this server
             self.ask("connect", "Ubisoft Connect is running but not signed in to this server. It needs a restart.",
                      ["Restart Ubisoft Connect"])
             connect.quit_connect()
@@ -252,24 +245,31 @@ class Session:
                 online = True
                 self.set("game", OK, "online on the server - have fun")
             self.wait(2)
-        self.set("game", OK if online else FAILED, "game closed" if online else "game closed before going online")
-        self.cleanup()
+        observer.poll()
+        self.set("game", OK if online else FAILED,
+                 "game closed - press Play to start it again" if online else
+                 "game closed before going online - press Play to try again")
+        self.end_game()
         return True
 
     # ---- cleanup -----------------------------------------------------------------------------------
-    def cleanup(self) -> None:
+    def end_game(self) -> None:
+        """After the game exits. The server keeps running while the launcher is open, so Ubisoft Connect
+        stays signed in and the next Play goes straight to the game."""
         if self.armer and self.armer.poll() is None:
             self.armer.terminate()
+        self.armer = None
+
+    def stop(self) -> None:
+        """The launcher closes: undo what it set up."""
+        self.cancel.set()
+        self.end_game()
         if self.cfg.remove_hosts_on_exit and self.hosts_added:
             elevate.hosts("remove", self.cfg.server_address, str(self.data_dir / "hosts-backups"))
             self.hosts_added = False
         if self.server_proc:
             self.server_proc.stop()
             self.server_proc = None
-
-    def stop(self) -> None:
-        self.cancel.set()
-        self.cleanup()
 
     def open_logs(self) -> None:
         webbrowser.open((self.data_dir / "logs").as_uri())
