@@ -66,6 +66,12 @@ async def test_cors_for_connects_web_ui(client):
     assert "Access-Control-Allow-Origin" not in r.headers
 
 
+async def test_no_cloud_save_metadata(client):
+    """Connect must never be offered a replayed (stale) cloud save."""
+    r = await client.get(f"/v1/profiles/{syn.PLAYER}/entities?name=upcCloudSaveUplayId_3280")
+    assert (await r.json()) == {"entities": []}
+
+
 async def test_connect_internet_check(client):
     for path in ("/health_check/test_internet.txt?cacheBuster=1", "/orbit/uplay_launcher_2_0/test_internet.txt"):
         r = await client.get(path, headers={"Host": "static3.cdn.ubi.com"})

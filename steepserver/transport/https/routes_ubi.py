@@ -209,7 +209,17 @@ async def internet_check(request: web.Request) -> web.Response:
     return web.Response(text="I AM ALIVE!", content_type="text/plain")
 
 
+async def get_entities_v1(request: web.Request) -> web.StreamResponse:
+    """GET /v1/profiles/{pid}/entities?name=upcCloudSaveUplayId_<product>: Ubisoft Connect's cloud-save
+    metadata. Saves are not stored on this server (yet), so there is no cloud save: replaying the
+    recorded metadata would make Connect offer to "restore" a save it can never download."""
+    if request.query.get("name", "").startswith("upcCloudSave"):
+        return json_response(request, {"entities": []}, "no-cloud-save")
+    return await request.app[FALLBACK](request)
+
+
 def add_routes(app: web.Application) -> None:
+    app.router.add_get("/v1/profiles/{profile_id}/entities", get_entities_v1)
     app.router.add_get(r"/{prefix:.*}test_internet.txt", internet_check)
     app.router.add_post("/v3/profiles/sessions", create_session)
     app.router.add_get("/v1/spaces/{space}/sandboxes/{sandbox}/rendezvous/configuration", rendezvous_configuration)
