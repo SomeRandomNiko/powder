@@ -16,6 +16,8 @@ class ServerConfig:
     demux_host: str = "127.0.0.2"       # Ubisoft Connect's demux (dmx.upc.ubisoft.com; hosts -> this address)
     demux_port: int = 443
     crl_port: int = 80                  # plain HTTP on 127.0.0.1: revocation list Ubisoft Connect checks
+    connect_cloud_saves: bool = False   # False: tell Ubisoft Connect the games have no cloud saves, so it
+                                        # never tries (and fails) to sync them at launch and exit
     data_dir: Path = Path("data")       # steep.db, logs/, TLS cert, NEX key  (relative to the config file)
     recordings_dir: Path = Path("recordings")   # replies recorded from real sessions (personal, never committed)
     log_level: str = "INFO"

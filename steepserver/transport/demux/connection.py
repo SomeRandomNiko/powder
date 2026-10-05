@@ -19,6 +19,7 @@ import asyncio
 import logging
 from collections import Counter
 
+from . import ownership  # noqa: F401  (registers its service handlers)
 from . import pb
 from .services import ServiceContext, answer
 

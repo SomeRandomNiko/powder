@@ -40,6 +40,22 @@ def test_request_styles_and_id_rewrite():
     assert pb.first(out, 1) == 42 and pb.decode(pb.first(out, 13))[1][1] == TOKEN
 
 
+def _product(pid: int, cloud: str) -> list:
+    return [(1, pid), (17, f"version: 2.0\r\nroot:\r\n  name: l1\r\n  cloud_saves: {cloud}\r\n")]
+
+
+def _owned(steep_cloud: str) -> bytes:
+    return pb.encode([(1, [(1, 1), (2, [(1, 1), (2, [(1, _product(3280, steep_cloud)), (1, _product(9999, "no")),
+                                                     (1, [(1, 4242)])]), (3, b"x")])])])
+
+
+def test_owned_games_without_cloud_saves():
+    from steepserver.transport.demux.ownership import without_cloud_saves
+    out, changed = without_cloud_saves(_owned("yes"))
+    assert changed == 1
+    assert out == _owned("no")                   # only the flag changed, lengths re-encoded
+
+
 def _fixtures() -> DemuxFixtures:
     return DemuxFixtures(
         client_version=13368,
