@@ -38,6 +38,7 @@ CONNECT_ALLOW = [
     ("GET", r"/v1/mdm/products"),
     ("GET", rf"/v1/spaces/{ID}/parameters"),
     ("GET", rf"/v1/spaces/{ID}/global/ubiconnect/games/api"),
+    ("GET", r"/v1/spaces/global/ubiconnect/games/api"),
     ("GET", rf"/v1/spaces/{ID}/global/ubiconnect/configcache/api/connecturls"),
     ("GET", rf"/v1/spaces/{ID}/global/ubiconnect/challenges/api"),
     ("GET", rf"/v1/spaces/{ID}/global/ubiconnect/rewards/api"),
@@ -46,6 +47,7 @@ CONNECT_ALLOW = [
     ("GET", rf"/v4/spaces/{GUID}/configs/events"),
     ("GET", rf"/v2/spaces/{GUID}/configs/news/tags"),
     ("GET", r"/orbit/uplay_launcher_14_0/free_games/latest\.txt"),
+    ("GET", r"/orbit/uplay_launcher_3_0/assets/[0-9a-f]+\.zip"),   # achievement definitions (Connect)
 ]
 RMC_ALLOW = {"GameStorageProtocol::GetGameParamaters_V1", "SteepTournamentProtocol::FetchSeasonInfo_V1"}
 STEEP_PRODUCTS = {3279, 3280}                      # Steam entry + Ubisoft product; their add-ons follow

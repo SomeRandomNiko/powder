@@ -136,7 +136,8 @@ async def test_personal_endpoints_are_generated_not_replayed(client):
     """Account details, friends and Club actions come from the player record: nothing of the recorded
     account (email, friends, action progress) is ever served."""
     me = await (await client.get("/v3/users/me", headers=UBI)).json()
-    assert me["nameOnPlatform"] == syn.PLAYER_NAME and me["email"] is None
+    assert me["nameOnPlatform"] == syn.PLAYER_NAME and me["email"].endswith("@steepserver.invalid")
+    assert me["email"] != syn.PLAYER_EMAIL and me["phone"]["number"] == ""
     friends = await (await client.get(f"/v3/profiles/{syn.PLAYER}/friends", headers=UBI)).json()
     assert friends["friends"] == []
     assert (await (await client.get("/v2/profiles/me/friends", headers=UBI)).json()) == {"friends": []}

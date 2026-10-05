@@ -135,6 +135,11 @@ async def test_entities_over_https(services, player):
         cards = {e["profileId"]: e["obj"]["RIDER_CARD"]["title"] for e in (await r.json())["entities"]}
         assert cards == {player: 99}
 
+        # a new entity created under the player's own path (the game does this for a new rider card)
+        created = await (await client.post(f"/v2/profiles/{player}/entities", headers=auth,
+                                           json={"type": "PROFILE_EXTRA", "obj": {"x": 1}})).json()
+        assert created["profileId"] == player and services.repos.entities.get(created["entityId"])
+
         # favorites: create and delete
         fav = await (await client.post("/v2/profiles/entities", headers=auth,
                                        json={"type": "FAVORITE_CHALLENGE", "tags": ["TRAIL"], "obj": {"c": 1}})).json()

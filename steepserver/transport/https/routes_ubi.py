@@ -173,7 +173,9 @@ async def put_entity(request: web.Request) -> web.Response:
 
 
 async def post_entity(request: web.Request) -> web.Response:
-    owner = _owner(request) or request.app[SERVICES].default_player_id()
+    """POST /v2/profiles/entities and /v2/profiles/{pid}/entities (e.g. a new player's rider card)."""
+    owner = (request.match_info.get("profile_id") or _owner(request)
+             or request.app[SERVICES].default_player_id()).lower()
     try:
         e = request.app[SERVICES].entities.create(await request.json(), owner)
     except ValueError as err:
@@ -217,3 +219,4 @@ def add_routes(app: web.Application) -> None:
     app.router.add_put("/v2/profiles/entities/{entity_id}", put_entity)
     app.router.add_delete("/v2/profiles/entities/{entity_id}", delete_entity)
     app.router.add_get("/v2/profiles/{profile_id}/entities", get_profile_entities)
+    app.router.add_post("/v2/profiles/{profile_id}/entities", post_entity)
