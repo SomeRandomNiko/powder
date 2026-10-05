@@ -29,8 +29,9 @@ async def run(config: Config) -> None:
     cfg = config.server
     services = Services.open(config)
     log.info("data: %s (schema v%d)", config.data_dir, services.db.version())
-    log.info("recordings: %s (%d HTTPS replies, %d NEX methods, %d offers)", cfg.recordings_dir,
-             len(services.assets.http.entries), len(services.assets.rmc.data), len(services.assets.catalog))
+    log.info("recordings: %s (%d HTTPS replies, %d NEX methods, %d offers; Ubisoft Connect: %d HTTPS, "
+             "%d demux)", cfg.recordings_dir, len(services.assets.http.entries), len(services.assets.rmc.data),
+             len(services.assets.catalog), len(services.assets.connect_http.entries), len(services.assets.demux))
     if services.assets.empty:
         log.warning("no recordings found - the game will get empty replies for everything not implemented")
 

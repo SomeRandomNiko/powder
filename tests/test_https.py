@@ -52,6 +52,26 @@ async def test_ubisoft_connect_login(client, services, auth):
     assert services.sessions.by_token(body["ticket"]).profile_id == syn.PLAYER
 
 
+async def test_cors_for_connects_web_ui(client):
+    origin = "https://connect.cdn.ubisoft.com"
+    r = await client.options("/v3/profiles/sessions", headers={
+        "Origin": origin, "Access-Control-Request-Method": "POST",
+        "Access-Control-Request-Headers": "ubi-appid,authorization"})
+    assert r.status == 200
+    assert r.headers["Access-Control-Allow-Origin"] == origin
+    assert r.headers["Access-Control-Allow-Headers"] == "ubi-appid,authorization"
+    r = await client.get("/v3/users/me", headers={"Origin": origin})
+    assert r.headers["Access-Control-Allow-Origin"] == origin
+    r = await client.get("/v3/users/me")                     # the game sends no Origin: untouched
+    assert "Access-Control-Allow-Origin" not in r.headers
+
+
+async def test_connect_internet_check(client):
+    for path in ("/health_check/test_internet.txt?cacheBuster=1", "/orbit/uplay_launcher_2_0/test_internet.txt"):
+        r = await client.get(path, headers={"Host": "static3.cdn.ubi.com"})
+        assert r.status == 200 and await r.text() == "I AM ALIVE!"
+
+
 async def test_rendezvous_points_at_our_nex_server(client):
     r = await client.get(f"/v1/spaces/{SPACE_ID}/sandboxes/STEEP_PC_TU7_A/rendezvous/configuration",
                          headers={"Host": "msr-public-ubiservices.ubi.com"})

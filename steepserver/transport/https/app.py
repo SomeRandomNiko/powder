@@ -2,6 +2,7 @@
 
 Request pipeline (outermost first):
   log_middleware      access log + keeps uploaded remotelog/events bodies (they explain client errors)
+  cors_middleware     CORS for Ubisoft Connect's web UI (preflights, Allow-Origin)
   plugin_middleware   plugins.before_http hooks may answer a request themselves
   session_middleware  `Authorization: Ubi_v1 t=<ticket>` -> request[SESSION]
   routes              routes_ubi.py (real logic), websocket.py
@@ -50,6 +51,32 @@ async def log_middleware(request: web.Request, handler):
     return response
 
 
+CORS_METHODS = "GET, POST, PUT, PATCH, DELETE, HEAD, OPTIONS"
+CORS_EXPOSE = "X-Total-Count, Ubi-TransactionId"
+
+
+@web.middleware
+async def cors_middleware(request: web.Request, handler):
+    """Ubisoft Connect's UI is a web page (origin https://connect.cdn.ubisoft.com) calling UbiServices
+    from its embedded browser, which needs CORS: answer preflights and allow the origin, like Ubisoft."""
+    origin = request.headers.get("Origin")
+    if not origin:
+        return await handler(request)
+    if request.method == "OPTIONS" and "Access-Control-Request-Method" in request.headers:
+        request[HOW] = "cors-preflight"
+        response = web.Response(status=200)
+        response.headers["Access-Control-Allow-Methods"] = CORS_METHODS
+        response.headers["Access-Control-Allow-Headers"] = request.headers.get("Access-Control-Request-Headers", "")
+    else:
+        response = await handler(request)
+        if response.prepared:                            # websocket upgrade: headers already sent
+            return response
+    response.headers["Access-Control-Allow-Origin"] = origin
+    response.headers["Access-Control-Allow-Credentials"] = "true"
+    response.headers["Access-Control-Expose-Headers"] = CORS_EXPOSE
+    return response
+
+
 @web.middleware
 async def plugin_middleware(request: web.Request, handler):
     plugins = request.app.get(PLUGINS)
@@ -90,7 +117,7 @@ async def fallback(request: web.Request) -> web.Response:
 
 
 def build_app(services, plugins=None, *, nex_public_key: str = "") -> web.Application:
-    app = web.Application(middlewares=[log_middleware, plugin_middleware, session_middleware],
+    app = web.Application(middlewares=[log_middleware, cors_middleware, plugin_middleware, session_middleware],
                           client_max_size=16 * 1024 * 1024)
     app[SERVICES] = services
     app[PLUGINS] = plugins

@@ -39,6 +39,7 @@ HOSTNAMES = [
     "*.olympus.ubi.com",
     "*.upc.ubi.com",
     "*.upc.ubisoft.com",
+    "*.cdn.ubi.com",                                     # static3.cdn.ubi.com: Connect's internet check
     "*.ubi.com",
     "*.ubisoft.com",
 ]

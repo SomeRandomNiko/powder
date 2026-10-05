@@ -52,6 +52,21 @@ def parse_request(service: str, msg: bytes) -> ServiceRequest | None:
     return None
 
 
+def outline(value, depth: int = 0) -> str:
+    """Field structure of a message for the log: numbers, small ints, short strings; long strings
+    (tickets, tokens) only by length."""
+    if isinstance(value, int):
+        return str(value)
+    if value and all(32 <= c < 127 for c in value):       # text first: printable bytes often also
+        return repr(value.decode()) if len(value) <= 40 else f"<text {len(value)}>"   # parse as protobuf
+    fields = pb.try_decode(value) if depth < 6 else None
+    if fields:
+        return "{" + " ".join(f"{n}:{outline(v, depth + 1)}" for n, v, _ in fields) + "}"
+    if value and all(32 <= c < 127 for c in value):
+        return repr(value.decode()) if len(value) <= 40 else f"<text {len(value)}>"
+    return f"<{len(value)}B>"
+
+
 def with_request_id(reply: bytes, request_id: int) -> bytes:
     """A recorded reply with its request id replaced (same place as in the request)."""
     fields = pb.decode(reply)
@@ -104,7 +119,8 @@ def answer(ctx: ServiceContext, service: str, msg: bytes) -> bytes | None:
     ctx.seen[(service, req.kind)] += 1
     recorded = ctx.services.assets.demux.reply(service, req.kind, nth)
     if recorded is None:
-        log.warning("DEMUX UNHANDLED %s #%d kind %d (%dB request)", service, req.request_id, req.kind, len(msg))
+        log.warning("DEMUX UNHANDLED %s #%d kind %d (%dB request): %s", service, req.request_id, req.kind,
+                    len(msg), outline(req.body))
         return None
     log.info("demux %s #%d kind %d -> recorded (%dB)", service, req.request_id, req.kind, len(recorded))
     return with_request_id(recorded, req.request_id)

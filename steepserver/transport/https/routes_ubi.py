@@ -201,7 +201,16 @@ async def put_populations_data(request: web.Request) -> web.StreamResponse:
     return await request.app[FALLBACK](request)
 
 
+# ---- Ubisoft Connect ----------------------------------------------------------------------------------
+async def internet_check(request: web.Request) -> web.Response:
+    """static3.cdn.ubi.com/.../test_internet.txt: Ubisoft Connect shows "no internet connection" unless
+    this answers like the real CDN."""
+    request[HOW] = "internet-check"
+    return web.Response(text="I AM ALIVE!", content_type="text/plain")
+
+
 def add_routes(app: web.Application) -> None:
+    app.router.add_get(r"/{prefix:.*}test_internet.txt", internet_check)
     app.router.add_post("/v3/profiles/sessions", create_session)
     app.router.add_get("/v1/spaces/{space}/sandboxes/{sandbox}/rendezvous/configuration", rendezvous_configuration)
     app.router.add_get("/v1/profiles/{profile_id}/inventory", get_inventory)

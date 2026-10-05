@@ -1,7 +1,8 @@
 # steepserver — offline server for Steep
 
 One process that stands in for Ubisoft's online services: the UbiServices HTTPS API (all
-`*.ubi.com` hosts, port 443) and the Quazal NEX/RendezVous server (UDP 6005). It answers from
+`*.ubi.com` hosts, port 443), the Quazal NEX/RendezVous server (UDP 6005) and what Ubisoft Connect
+needs to stay online (its demux protocol, see below). It answers from
 recordings of real sessions, keeps per-player state in SQLite, and is built to grow: several
 players, gameplay toggles, plugins, admin tools.
 
@@ -33,10 +34,36 @@ Full live procedure: `notes\SESSION-HANDOFF.md`.
 Runtime files go to `data/` (`steep.db`, `logs/server.log`, `bodies/` = logs the game uploads,
 `tls/server.pem` and `nex_signing_key.pem`, both generated on first run).
 
+## Ubisoft Connect
+
+Steep only goes online when Ubisoft Connect is online, and without Ubisoft's servers Connect starts in
+offline mode. So the server also stands in for what Connect needs:
+
+- **Login**: Connect's `POST /v3/profiles/sessions` (remember-me, refresh or email:password; every
+  credential is accepted, passwords are never logged or stored) and its other UbiServices calls,
+  answered from `recordings/connect-fixtures.json`.
+- **Demux** (`dmx.upc.ubisoft.com`, mapped to `127.0.0.2:443` by the hosts file): Connect's own
+  protocol for login, owned games, play sessions and ownership tokens
+  (`transport/demux/`, replies from `recordings/demux.json`).
+- **Internet check** (`static3.cdn.ubi.com/.../test_internet.txt`) and CORS for Connect's web UI.
+- **Certificates**: Connect checks them through Windows, so the server generates a local CA in
+  `data/tls/`, restricted by name constraints to `ubi.com` / `ubisoft.com` / loopback, and serves its
+  revocation list on `http://127.0.0.1/steep-ca.crl`. Trust it once:
+
+```
+uv run steepserver admin trust install    # current user's trusted roots; Windows asks to confirm
+uv run steepserver admin trust status
+uv run steepserver admin trust remove
+```
+
+Not emulated yet: cloud saves (Connect's "failed to synchronize game save": choose Skip), the friends
+list and the store/news pages of Connect's UI.
+
 ## Recordings (your data, never committed)
 
 `recordings/` holds replies recorded from your own online sessions: `fixtures.json` (HTTPS),
-`fixtures-rmc.json` (NEX), `inventory-updates.json`, and optionally `sessions/*.jsonl` (decrypted
+`fixtures-rmc.json` (NEX), `inventory-updates.json`, `connect-fixtures.json` and `demux.json`
+(Ubisoft Connect), and optionally `sessions/*.jsonl` (decrypted
 NEX sessions, used by `tests/test_recordings.py`). They contain personal data (your account,
 friends, other players on leaderboards), so the folder is gitignored and nothing in the repository
 may depend on it. Without recordings the server still runs; it simply has nothing to replay. The
@@ -79,12 +106,13 @@ steepserver/
   app.py              starts HTTPS + NEX on one event loop
   config.py           config.toml -> Config; gameplay toggles per player
   constants.py        game-wide ids: app, space, credits item
-  tls.py              self-signed certificate for the Ubisoft hostnames (generated on first run)
+  tls.py              local CA (name-constrained) + server certificate + CRL (generated on first run)
   fixtures/           lookups over the recordings; catalog.py = store offers
   core/               identity (who logs in), sessions (tickets, live connections, server push), events
   db/                 SQLite, numbered migrations, repositories
   services/           game logic: accounts, economy, stats (progression), entities, matchmaking, seed
-  transport/https/    aiohttp app, UbiServices routes, notification WebSocket
+  transport/https/    aiohttp app, UbiServices routes, notification WebSocket, CRL site
+  transport/demux/    Ubisoft Connect's demux protocol (TLS, protobuf, per-service replies)
   transport/nex/      PRUDP, secure channel, RMC codec, dispatcher, per-protocol handlers
   plugins/            plugin API + loader
   admin/              CLI
