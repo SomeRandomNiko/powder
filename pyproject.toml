@@ -1,7 +1,7 @@
 [project]
 name = "steepserver"
 version = "0.1.0"
-description = "Offline server for Steep (UbiServices HTTPS + Quazal NEX), for preserving an owned copy"
+description = "Powder: self-hosted stand-in for Steep's online services, to keep an owned copy playable"
 requires-python = ">=3.12"
 dependencies = [
     "aiohttp>=3.9",

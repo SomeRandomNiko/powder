@@ -8,13 +8,16 @@ nex_port = 6005
 crl_port = 80               # revocation list for the local CA (http://public-ubiservices.ubi.com/steep-ca.crl)
 connect_cloud_saves = false # false: Ubisoft Connect treats games as having no cloud saves (no sync prompts)
 data_dir = "data"           # database, logs, uploaded game logs, generated TLS cert + NEX signing key
-recordings_dir = "recordings"   # replies recorded from your own online sessions (personal; gitignored)
+gamedata_dir = "gamedata"   # the game-data pack (not in the repository, see README)
+recordings_dir = "recordings"   # your own recorded sessions; only read by `gamedata build` and `admin import`
+country = "US"              # what Ubisoft Connect is told about the player's location
+region = "NA"
 log_level = "INFO"
 strict_tickets = false      # true: refuse requests with tickets the server did not issue
 
 [players]
-# default = "<profile id>"  # player used when a login cannot be told apart. Unset: the account your
-#                           # recordings belong to, or (no recordings) a local player created on first run.
+# default = "<profile id>"  # player used when a login cannot be told apart. Unset: the imported player,
+#                           # or else the first player, created as a new account on the first login.
 # Map friends' machines to their own player (profile id), by the IP the server sees:
 # [players.bind]
 # "192.168.1.20" = "<profile id>"
