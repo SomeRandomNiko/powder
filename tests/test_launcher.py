@@ -74,6 +74,19 @@ def test_steam_library_lookup(tmp_path, monkeypatch):
     assert locate.steep_exe() == exe
 
 
+def test_real_game_is_the_one_connect_started(monkeypatch):
+    from steeplauncher import attach
+    # (pid, parent pid, threads, exe) as in a real launch: Steam's starter, then Connect's real game
+    procs = [(1, 0, 90, "steam.exe"), (2, 0, 30, "UbisoftGameLauncher.exe"),
+             (10, 1, 6, "Steep.exe"), (11, 2, 6, "Steep.exe")]
+    monkeypatch.setattr(attach, "_snapshot", lambda: procs)
+    assert attach.real_game_pid() == 11                 # by parent, even before it has many threads
+    procs[:] = [(1, 0, 90, "steam.exe"), (10, 1, 6, "Steep.exe")]
+    assert attach.real_game_pid() is None               # only the starter: not the game
+    procs[:] = [(5, 0, 9, "renamedlauncher.exe"), (12, 5, 37, "Steep.exe")]
+    assert attach.real_game_pid() == 12                 # fallback: thread count
+
+
 def test_config(tmp_path):
     p = tmp_path / "launcher.toml"
     p.write_text('server_address = "192.168.1.10"\nremove_hosts_on_exit = true\n')

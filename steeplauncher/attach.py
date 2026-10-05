@@ -123,10 +123,20 @@ class ProcessObserver:
                               now - self.seen[pid])
 
 
+# Steam starts a Steep.exe that only hands over to Ubisoft Connect and exits after ~2 s; Connect's
+# game launcher then starts the real game. Both have the same command line, so the parent decides.
+CONNECT_PARENTS = {"ubisoftgamelauncher.exe", "ubisoftgamelauncher64.exe", "upc.exe", "ubisoftconnect.exe"}
+
+
 def real_game_pid(min_threads: int = 20) -> int | None:
-    """The real game, not Steam's launcher stub: the Steep.exe with the most threads (>= min_threads)."""
-    procs = [p for p in game_processes() if p.threads >= min_threads]
-    return max(procs, key=lambda p: p.threads).pid if procs else None
+    """The real game, not Steam's starter: the Steep.exe started by Ubisoft Connect. Fallback if no
+    parent matches (e.g. Connect renamed its processes): the Steep.exe with the most threads."""
+    procs = game_processes()
+    by_connect = [p for p in procs if p.parent_name.lower() in CONNECT_PARENTS]
+    if by_connect:
+        return by_connect[-1].pid
+    busy = [p for p in procs if p.threads >= min_threads]
+    return max(busy, key=lambda p: p.threads).pid if busy else None
 
 
 def load_dll(pid: int, dll: Path = DLL) -> bool:
@@ -176,11 +186,10 @@ def ready() -> str | None:
     return f"missing {', '.join(missing)}: run native\\build.ps1" if missing else None
 
 
-def wait_for_real_game(timeout: float, stop=lambda: False, settle: float = 3.0,
+def wait_for_real_game(timeout: float, stop=lambda: False, settle: float = 1.0,
                        observer: "ProcessObserver | None" = None) -> int | None:
-    """The real game pid once it has been up for `settle` seconds. The thread count already tells the
-    real game from Steam's short-lived starter, so a short settle is enough; attaching early matters,
-    because the player can press a key at the title screen right away."""
+    """The real game pid once it has been up for `settle` seconds (a moment to finish starting up).
+    Attaching early matters: the player can press a key at the title screen right away."""
     deadline = time.monotonic() + timeout
     first_seen: dict[int, float] = {}
     while time.monotonic() < deadline and not stop():

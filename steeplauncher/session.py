@@ -231,7 +231,11 @@ class Session:
             self.set("game", FAILED, "Steep did not start")
             return False
         self.set("game", RUNNING, f"attaching the TLS helper (pid {pid})")
-        if not attach.load_dll(pid):
+        for attempt in range(20):                        # right after start-up it may not be ready yet
+            if attach.load_dll(pid):
+                break
+            self.wait(0.5)
+        else:
             self.set("game", FAILED, "could not load the TLS helper into the game")
             return False
         for _ in range(100):
