@@ -62,7 +62,7 @@ VSVersionInfo(
     $licences = "$root\dist\Powder\THIRD_PARTY_LICENSES.txt"
     uv run pip-licenses --from=mixed --with-license-file --no-license-path --format=plain-vertical --output-file $licences
     if ($LASTEXITCODE) { throw "pip-licenses failed" }
-    "`n`nPython`n$(python -c 'import sys; print(sys.version)' 2>$null)`nPython Software Foundation License; see https://docs.python.org/3/license.html" |
+    "`n`nPython`n$(uv run python -c 'import sys; print(sys.version)')`nPython Software Foundation License; see https://docs.python.org/3/license.html" |
         Add-Content $licences
     Copy-Item "$root\LICENSE" "$root\dist\Powder\LICENSE.txt"
 

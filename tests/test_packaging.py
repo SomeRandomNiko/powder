@@ -144,3 +144,19 @@ def test_busy_port_is_detected(monkeypatch):
         monkeypatch.setattr(ports, "process_name", lambda pid: "test.exe")
         lines = ports.busy("127.0.0.1", [ports.Port(taken, "TCP", "HTTPS")])
     assert len(lines) == 1 and f"port {taken} (TCP, HTTPS)" in lines[0]
+
+
+# ---- release workflow: next tag ------------------------------------------------------------------
+def test_next_release_tag():
+    import importlib.util
+    spec = importlib.util.spec_from_file_location("next_version", paths.REPO / "packaging" / "next_version.py")
+    nv = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(nv)
+    assert nv.next_tag([], "major") == "v0.1.0"                          # first release
+    tags = ["v0.1.0", "v0.1.1", "v0.10.0", "v0.9.9", "v1.0.0-rc1", "notes", "v0.2.0"]
+    assert nv.next_tag(tags, "patch") == "v0.10.1"                       # numeric, not text order
+    assert nv.next_tag(tags, "minor") == "v0.11.0"
+    assert nv.next_tag(tags, "major") == "v1.0.0"
+    import pytest
+    with pytest.raises(ValueError):
+        nv.next_tag(tags, "huge")

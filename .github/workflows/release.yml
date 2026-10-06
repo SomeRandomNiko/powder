@@ -1,0 +1,119 @@
+# Release: tag the next version on a ref, build the installer, create a draft release.
+# Run it from the Actions tab ("Run workflow"). If the build fails or the run is cancelled, the tag and any
+# draft release it created are removed again.
+name: Release
+
+on:
+  workflow_dispatch:
+    inputs:
+      ref:
+        description: Branch, tag or commit to release
+        type: string
+        default: main
+      bump:
+        description: Version bump (the first release is v0.1.0)
+        type: choice
+        options: [patch, minor, major]
+        default: patch
+
+permissions:
+  contents: write
+
+concurrency:
+  group: release
+  cancel-in-progress: false
+
+jobs:
+  tag:
+    name: Tag the next version
+    runs-on: ubuntu-latest
+    outputs:
+      tag: ${{ steps.next.outputs.tag }}
+      version: ${{ steps.next.outputs.version }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.ref }}
+          fetch-depth: 0
+
+      - name: Next version
+        id: next
+        env:
+          BUMP: ${{ inputs.bump }}
+        run: |
+          git fetch --tags --force
+          tag=$(git tag --list | python3 packaging/next_version.py "$BUMP")
+          if git rev-parse -q --verify "refs/tags/$tag" >/dev/null; then
+            echo "::error::tag $tag already exists"; exit 1
+          fi
+          echo "tag=$tag" >> "$GITHUB_OUTPUT"
+          echo "version=${tag#v}" >> "$GITHUB_OUTPUT"
+          echo "Next release: $tag on $(git rev-parse --short HEAD)" >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Create and push the tag
+        env:
+          TAG: ${{ steps.next.outputs.tag }}
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git tag -a "$TAG" -m "Powder $TAG"
+          git push origin "refs/tags/$TAG"
+
+  build:
+    name: Build the installer and draft the release
+    needs: tag
+    runs-on: windows-latest
+    env:
+      TAG: ${{ needs.tag.outputs.tag }}
+      VERSION: ${{ needs.tag.outputs.version }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: refs/tags/${{ needs.tag.outputs.tag }}
+
+      - uses: astral-sh/setup-uv@v6
+        with:
+          python-version: "3.12"
+
+      - uses: mlugg/setup-zig@v2
+        with:
+          version: 0.17.0
+
+      - name: Install Inno Setup
+        run: choco install innosetup -y --no-progress
+
+      - name: Build (helpers, tests, PyInstaller, installer)
+        shell: pwsh
+        run: ./packaging/build.ps1 -Version $env:VERSION
+
+      # Signing goes here once there is a certificate (e.g. SignPath Foundation for open-source projects).
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: Powder-Setup-${{ needs.tag.outputs.tag }}
+          path: dist/Powder-Setup-${{ needs.tag.outputs.tag }}.exe
+          if-no-files-found: error
+
+      - name: Draft release
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: >
+          gh release create $env:TAG "dist/Powder-Setup-$env:TAG.exe"
+          --draft --verify-tag --generate-notes --title "Powder $env:TAG"
+
+  cleanup:
+    name: Remove the tag after a failed or cancelled build
+    needs: [tag, build]
+    if: always() && needs.tag.result == 'success' && needs.build.result != 'success'
+    runs-on: ubuntu-latest
+    env:
+      GH_TOKEN: ${{ github.token }}
+      TAG: ${{ needs.tag.outputs.tag }}
+      REPO: ${{ github.repository }}
+    steps:
+      - name: Delete the draft release and the tag
+        run: |
+          gh release delete "$TAG" --repo "$REPO" --yes 2>/dev/null && echo "deleted draft release $TAG" || true
+          gh api -X DELETE "repos/$REPO/git/refs/tags/$TAG" && echo "deleted tag $TAG"
+          echo "Build did not succeed: tag $TAG removed" >> "$GITHUB_STEP_SUMMARY"
