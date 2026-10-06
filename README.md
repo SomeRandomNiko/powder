@@ -86,6 +86,22 @@ certificate check without changing code bytes at first, `native/armer.exe` keeps
 patches the check once the game's integrity check is over. It only fits the `Steep.exe` build listed in
 `steeplauncher/game.py`. Game files are never modified on disk.
 
+### Restoring your PC
+
+**Restore system…** in the launcher undoes everything the launcher set up: it stops the server it
+started, quits Ubisoft Connect (which otherwise stays connected to the server), removes the hosts-file
+entries (one UAC prompt, the previous file is backed up) and removes the server's certificate (Windows
+asks to confirm). Each step only acts if something is there, so it is safe to run any time; **Play** sets
+everything up again. The same from a console:
+
+```
+uv run steep-launcher --status      # what is set up right now
+uv run steep-launcher --restore     # undo it
+```
+
+Your data (`data/`, the game-data pack) is kept. Game files are never changed, so there is nothing to
+undo there.
+
 Runtime files go to `data/` (`steep.db`, `logs/server.log`, `bodies/` = logs the game uploads,
 `tls/` = local CA and server certificate, `nex_signing_key.pem`; all generated on first run).
 

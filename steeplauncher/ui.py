@@ -15,7 +15,7 @@ class LauncherWindow:
     def __init__(self, session: Session):
         self.session = session
         self.root = tk.Tk()
-        self.root.title("Steep offline launcher")
+        self.root.title("Powder")
         self.root.geometry("760x520")
         self.root.protocol("WM_DELETE_WINDOW", self.quit)
         session.on_update = lambda: self.root.after(0, self.render)
@@ -23,7 +23,8 @@ class LauncherWindow:
         top = ttk.Frame(self.root, padding=8)
         top.pack(fill="x")
         ttk.Button(top, text="Play", command=session.start).pack(side="left")
-        ttk.Button(top, text="Open logs", command=session.open_logs).pack(side="left", padx=6)
+        ttk.Button(top, text="Restore system…", command=session.restore).pack(side="left", padx=6)
+        ttk.Button(top, text="Open logs", command=session.open_logs).pack(side="left")
         ttk.Button(top, text="Quit", command=self.quit).pack(side="right")
 
         self.body = ttk.Frame(self.root, padding=8)

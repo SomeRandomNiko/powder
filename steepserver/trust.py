@@ -14,6 +14,8 @@ from pathlib import Path
 from cryptography import x509
 from cryptography.hazmat.primitives import hashes
 
+from .tls import CA_NAME
+
 
 class TrustError(RuntimeError):
     pass
@@ -48,12 +50,33 @@ def install(ca_pem: Path) -> None:
         raise TrustError(f"certificate not installed (certutil exit {r.returncode})")
 
 
+def parse_store(out: str) -> list[tuple[str, str]]:
+    """(SHA-1 thumbprint, subject) per certificate in `certutil -store` output."""
+    certs = []
+    for block in re.split(r"=+ Certificate \d+ =+", out)[1:]:
+        subject = re.search(r"^Subject: (.*)$", block, re.M)
+        thumb = re.search(r"Cert Hash\(sha1\): ([0-9a-fA-F ]+)", block)
+        if subject and thumb:
+            certs.append((thumb.group(1).replace(" ", "").upper(), subject.group(1).strip()))
+    return certs
+
+
+def installed_cas(name: str = CA_NAME) -> list[tuple[str, str]]:
+    """Every trusted root issued by a steepserver (any data folder's CA has this name)."""
+    return [(t, s) for t, s in parse_store(_certutil("-store", "Root").stdout) if f"CN={name}" in s]
+
+
+def remove_thumbprint(thumb: str) -> None:
+    """Remove one trusted root; Windows shows a confirmation dialog, declining raises TrustError."""
+    r = _certutil("-delstore", "Root", thumb)
+    if r.returncode or thumb in trusted_thumbprints():
+        raise TrustError(f"certificate not removed (certutil exit {r.returncode})")
+
+
 def remove(ca_pem: Path) -> None:
     thumb = thumbprint(ca_pem)
     if thumb in trusted_thumbprints():
-        r = _certutil("-delstore", "Root", thumb)
-        if r.returncode:
-            raise TrustError(f"certutil -delstore failed ({r.returncode})")
+        remove_thumbprint(thumb)
 
 
 def other_tool_roots() -> list[str]:

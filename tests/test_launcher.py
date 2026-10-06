@@ -113,3 +113,116 @@ def test_session_ask_waits_for_choice(tmp_path):
     s.choose("B")
     t.join(2)
     assert got["c"] == "B"
+
+
+# ---- restore system ------------------------------------------------------------------------------
+STORE = """Root "Trusted Root Certification Authorities"
+================ Certificate 0 ================
+Serial Number: 01
+Issuer: O=steepserver (local), CN=steepserver local CA
+Subject: O=steepserver (local), CN=steepserver local CA
+Cert Hash(sha1): aa bb cc dd
+================ Certificate 1 ================
+Serial Number: 02
+Subject: CN=Some Public Root, O=Example
+Cert Hash(sha1): 11223344
+================ Certificate 2 ================
+Serial Number: 03
+Subject: O=steepserver (local), CN=steepserver local CA
+Cert Hash(sha1): eeff0011
+CertUtil: -store command completed successfully.
+"""
+
+
+def test_certutil_store_parsing(monkeypatch):
+    from steepserver import trust
+    assert trust.parse_store(STORE)[1] == ("11223344", "CN=Some Public Root, O=Example")
+
+    class R:
+        stdout, returncode = STORE, 0
+    monkeypatch.setattr(trust, "_certutil", lambda *a: R)
+    assert [t for t, _ in trust.installed_cas()] == ["AABBCCDD", "EEFF0011"]    # only the server's CAs
+
+
+class FakePC:
+    """Everything the restore flow touches, in memory."""
+
+    def __init__(self, hosts=True, cas=2, connect=True, game=False):
+        self.hosts = ["# marker", "127.0.0.1 public-ubiservices.ubi.com"] if hosts else []
+        self.cas = [(f"T{i}", "CN=steepserver local CA") for i in range(cas)]
+        self.connect, self.game, self.calls = connect, game, []
+
+    def install(self, monkeypatch, uac_ok=True):
+        from steepserver import trust
+        from steeplauncher import attach, connect, elevate, footprint, server
+
+        def hosts(action, address, backup_dir):
+            self.calls.append(("hosts", action))
+            if uac_ok:
+                self.hosts = []
+            return 0 if uac_ok else -1
+
+        def remove(thumb):
+            self.calls.append(("cert", thumb))
+            self.cas = [c for c in self.cas if c[0] != thumb]
+
+        def quit_connect():
+            self.calls.append(("quit connect",))
+            self.connect = False
+
+        monkeypatch.setattr(attach, "game_processes", lambda: [1] if self.game else [])
+        monkeypatch.setattr(connect, "running", lambda: self.connect)
+        monkeypatch.setattr(connect, "quit_connect", quit_connect)
+        monkeypatch.setattr(connect, "start", lambda exe: self.calls.append(("start connect",)))
+        monkeypatch.setattr(footprint, "hosts_lines", lambda *a: list(self.hosts))
+        monkeypatch.setattr(elevate, "hosts", hosts)
+        monkeypatch.setattr(dns, "flush_dns", lambda: self.calls.append(("flush",)))
+        monkeypatch.setattr(trust, "installed_cas", lambda *a: list(self.cas))
+        monkeypatch.setattr(trust, "remove_thumbprint", remove)
+        monkeypatch.setattr(server, "status", lambda *a, **k: None)
+        monkeypatch.setattr(locate, "connect_exe", lambda: "upc.exe")
+
+
+class Scripted(Session):
+    def __init__(self, *a, answers=()):
+        super().__init__(*a)
+        self.answers, self.asked = list(answers), []
+
+    def ask(self, key, text, actions, details=""):
+        self.asked.append((key, actions))
+        return self.answers.pop(0)
+
+
+def test_restore_undoes_hosts_and_certificates(tmp_path, monkeypatch):
+    from steeplauncher import footprint
+    from steeplauncher.session import restore_steps
+    pc = FakePC()
+    pc.install(monkeypatch)
+    assert not footprint.scan(LauncherConfig()).clean
+    s = Scripted(LauncherConfig(), tmp_path, answers=["Quit Ubisoft Connect", "Start Ubisoft Connect"])
+    s.steps = restore_steps()
+    s._run(s.restore_flow())
+    assert pc.calls == [("quit connect",), ("hosts", "remove"), ("flush",), ("cert", "T0"), ("cert", "T1"),
+                        ("start connect",)]
+    assert all(st.state == "ok" for st in s.steps) and footprint.scan(LauncherConfig()).clean
+
+
+def test_restore_on_a_clean_pc_changes_nothing(tmp_path, monkeypatch):
+    from steeplauncher.session import restore_steps
+    pc = FakePC(hosts=False, cas=0, connect=True)
+    pc.install(monkeypatch)
+    s = Scripted(LauncherConfig(), tmp_path, answers=["Leave it running"])
+    s.steps = restore_steps()
+    s._run(s.restore_flow())
+    assert pc.calls == [] and all(st.state == "ok" for st in s.steps)
+
+
+def test_restore_declined_uac_is_reported(tmp_path, monkeypatch):
+    from steeplauncher.session import FAILED, restore_steps
+    pc = FakePC(cas=0, connect=False)
+    pc.install(monkeypatch, uac_ok=False)
+    s = Scripted(LauncherConfig(), tmp_path, answers=["Try again", "Skip"])
+    s.steps = restore_steps()
+    s._run(s.restore_flow())
+    assert [c for c in pc.calls if c[0] == "hosts"] == [("hosts", "remove")] * 2
+    assert s.step("hosts").state == FAILED and s.step("check").state == FAILED

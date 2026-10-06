@@ -2,7 +2,8 @@
 something when needed; when it needs the user (hosts entries, certificate, restarting Connect) it shows
 the choices and waits for one. The UI only renders steps and forwards button clicks.
 
-Steps: game files -> server -> DNS -> certificate -> Ubisoft Connect -> game -> (cleanup on exit)
+Play:            game files -> server -> DNS -> certificate -> Ubisoft Connect -> game -> (cleanup on exit)
+Restore system:  Steep closed -> server stopped -> Connect quit -> hosts entries removed -> CA removed -> check
 """
 from __future__ import annotations
 
@@ -16,7 +17,9 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Callable
 
-from . import attach, certs, connect, dns, elevate, game, locate, server
+from steepserver import trust
+
+from . import attach, certs, connect, dns, elevate, footprint, game, locate, server
 from .config import LauncherConfig
 
 log = logging.getLogger("steeplauncher")
@@ -38,11 +41,20 @@ class Cancelled(Exception):
     pass
 
 
+def play_steps() -> list[Step]:
+    return [Step("files", "Game files"), Step("server", "Server"), Step("dns", "DNS / hosts"),
+            Step("cert", "Certificate"), Step("connect", "Ubisoft Connect"), Step("game", "Steep")]
+
+
+def restore_steps() -> list[Step]:
+    return [Step("game", "Steep"), Step("server", "Server"), Step("connect", "Ubisoft Connect"),
+            Step("hosts", "Hosts file"), Step("cert", "Certificate"), Step("check", "Result")]
+
+
 class Session:
     def __init__(self, cfg: LauncherConfig, data_dir: Path, on_update: Callable[[], None] = lambda: None):
         self.cfg, self.data_dir, self.on_update = cfg, data_dir, on_update
-        self.steps = [Step("files", "Game files"), Step("server", "Server"), Step("dns", "DNS / hosts"),
-                      Step("cert", "Certificate"), Step("connect", "Ubisoft Connect"), Step("game", "Steep")]
+        self.steps = play_steps()
         self.choices: queue.Queue[str] = queue.Queue()
         self.cancel = threading.Event()
         self.server_proc: server.ServerProcess | None = None
@@ -88,18 +100,30 @@ class Session:
 
     # ---- run --------------------------------------------------------------------------------------
     def start(self) -> None:
+        """Play: set up what is missing and start the game."""
+        self._launch(play_steps(), (self.check_files, self.check_server, self.check_dns, self.check_cert,
+                                    self.check_connect, self.run_game))
+
+    def restore(self) -> None:
+        """Restore system: undo what the launcher set up (see footprint.py)."""
+        self._launch(restore_steps(), self.restore_flow())
+
+    def restore_flow(self) -> tuple:
+        return (self.restore_game, self.restore_server, self.restore_connect, self.restore_hosts,
+                self.restore_cert, self.restore_check)
+
+    def _launch(self, steps: list[Step], flow) -> None:
         if self.thread and self.thread.is_alive():
             return
         self.cancel.clear()
-        for s in self.steps:
-            s.state, s.text, s.actions, s.details = PENDING, "", [], ""
-        self.thread = threading.Thread(target=self._run, daemon=True)
+        self.steps = steps
+        self.on_update()
+        self.thread = threading.Thread(target=self._run, args=(flow,), daemon=True)
         self.thread.start()
 
-    def _run(self) -> None:
+    def _run(self, flow) -> None:
         try:
-            for fn in (self.check_files, self.check_server, self.check_dns, self.check_cert,
-                       self.check_connect, self.run_game):
+            for fn in flow:
                 if not fn():
                     return
         except Cancelled:
@@ -250,6 +274,93 @@ class Session:
                  "game closed - press Play to start it again" if online else
                  "game closed before going online - press Play to try again")
         self.end_game()
+        return True
+
+    # ---- restore system ----------------------------------------------------------------------------
+    def restore_game(self) -> bool:
+        while attach.game_processes():
+            self.ask("game", "Steep is running. Close it first.", ["Check again"])
+        self.end_game()
+        self.set("game", OK, "not running")
+        return True
+
+    def restore_server(self) -> bool:
+        if self.server_proc and self.server_proc.running():
+            self.set("server", RUNNING, "stopping the local server")
+            self.server_proc.stop()
+            self.server_proc = None
+            self.set("server", OK, "stopped the server the launcher started (its data is kept)")
+        elif server.status(self.cfg, timeout=1.0):
+            self.set("server", OK, "a server the launcher did not start is running; left as it is")
+        else:
+            self.set("server", OK, "not running")
+        return True
+
+    def restore_connect(self) -> bool:
+        if not connect.running():
+            self.set("connect", OK, "not running")
+            return True
+        choice = self.ask("connect", "Ubisoft Connect is running and stays connected to the server until it "
+                                     "restarts. Quit it now? Next time it starts it connects to Ubisoft and asks "
+                                     "for your Ubisoft login.", ["Quit Ubisoft Connect", "Leave it running"])
+        if choice == "Leave it running":
+            self.set("connect", OK, "left running (restart it yourself to reach Ubisoft)")
+            return True
+        connect.quit_connect()
+        self.set("connect", OK if not connect.running() else FAILED,
+                 "closed" if not connect.running() else "could not close it; please quit it from the tray")
+        return True
+
+    def restore_hosts(self) -> bool:
+        while footprint.hosts_lines():
+            self.set("hosts", RUNNING, "removing the redirect entries (Windows asks for admin rights)")
+            backups = self.data_dir / "hosts-backups"
+            code = elevate.hosts("remove", self.cfg.server_address, str(backups))
+            if code == 0:
+                dns.flush_dns()
+                self.hosts_added = False
+                self.set("hosts", OK, f"redirect entries removed (previous file backed up to {backups})")
+                return True
+            choice = self.ask("hosts", "The hosts file was not changed" + (" (admin rights declined)." if code == -1
+                              else f" (error {code})."), ["Try again", "Skip"])
+            if choice == "Skip":
+                self.set("hosts", FAILED, "redirect entries still in the hosts file")
+                return True
+        self.set("hosts", OK, "no redirect entries")
+        return True
+
+    def restore_cert(self) -> bool:
+        cas = trust.installed_cas()
+        if not cas:
+            self.set("cert", OK, "no server certificate installed")
+            return True
+        for thumb, _ in cas:
+            while True:
+                self.set("cert", RUNNING, "removing the server's certificate (Windows asks to confirm)")
+                try:
+                    trust.remove_thumbprint(thumb)
+                    break
+                except trust.TrustError as e:
+                    if self.ask("cert", f"Not removed: {e}.", ["Try again", "Skip"]) == "Skip":
+                        break
+        left = trust.installed_cas()
+        self.set("cert", FAILED if left else OK, f"{len(left)} server certificate(s) still trusted" if left else
+                 f"removed {len(cas)} server certificate(s)")
+        return True
+
+    def restore_check(self) -> bool:
+        fp = footprint.scan(self.cfg)
+        if not fp.clean:
+            self.set("check", FAILED, "not everything could be undone: " + "; ".join(fp.lines()[:2]))
+            return True
+        upc = Path(self.cfg.connect_exe) if self.cfg.connect_exe else locate.connect_exe()
+        if fp.connect_running or not upc:
+            self.set("check", OK, "everything the launcher set up is undone. Press Play to set it up again.")
+            return True
+        if self.ask("check", "Everything the launcher set up is undone. Press Play to set it up again.",
+                    ["Start Ubisoft Connect", "Done"]) == "Start Ubisoft Connect":
+            connect.start(upc)
+        self.set("check", OK, "everything the launcher set up is undone. Press Play to set it up again.")
         return True
 
     # ---- cleanup -----------------------------------------------------------------------------------
