@@ -198,3 +198,46 @@ async def test_patch_check_on_its_own_connection_gets_the_reported_version(demux
     finally:
         w1.close()
         w2.close()
+
+
+# ---- achievements ------------------------------------------------------------------------------------
+def _write(rid, product, earned):
+    key = [(1, product[0]), (2, product[1]), (3, synthetic.SPACE_ID)]
+    entries = [(1, [(1, i), (2, t)]) for i, t in earned.items()]
+    return pb.encode([(1, rid), (4, [(1, [(1, [(1, key), (2, entries)])])])])
+
+
+def _read(rid, product=("STP", "PC")):
+    return pb.encode([(1, rid), (3, [(2, [(1, product[0]), (2, product[1])])])])
+
+
+def _earned(reply: bytes) -> dict[int, int]:
+    body = pb.decode(pb.first(pb.decode(reply), 3))
+    entry = pb.decode(pb.first(pb.decode(pb.first(body, 2)), 1))
+    return {pb.first(e, 1): pb.first(e, 2) for e in
+            (pb.decode(v) for n, v, _ in pb.decode(pb.first(entry, 2, b"")))}
+
+
+def test_achievements_are_stored_and_returned(services, player):
+    from powder.server.transport.demux.services import ServiceContext, answer
+    ctx = ServiceContext(services, player)
+    assert _earned(answer(ctx, "ach_frontend", _read(1))) == synthetic.ACHIEVEMENTS   # imported
+    # Connect writes its whole known list: one new, one with a later time (earliest stays)
+    ack = answer(ctx, "ach_frontend", _write(2, ("STP", "PC"), {1: 1_600_000_000, 30: 1_700_000_000}))
+    assert pb.first(pb.decode(ack), 1) == 2
+    assert _earned(answer(ctx, "ach_frontend", _read(3))) == {**synthetic.ACHIEVEMENTS, 30: 1_700_000_000}
+    # another product is kept apart; another player sees nothing
+    answer(ctx, "ach_frontend", _write(4, ("XYZ", "PC"), {7: 5}))
+    assert services.repos.achievements.products(player) == {"STP:PC": 4, "XYZ:PC": 1}
+    other = ServiceContext(services, "00000000-0000-4000-8000-0000000000ff")
+    assert _earned(answer(other, "ach_frontend", _read(5))) == {}
+    # without a login nothing is stored, and the reply still has the (empty) earned list
+    nobody = ServiceContext(services, None)
+    answer(nobody, "ach_frontend", _write(6, ("STP", "PC"), {99: 1}))
+    assert 99 not in services.repos.achievements.all(player, "STP:PC")
+    assert _earned(answer(nobody, "ach_frontend", _read(7))) == {}
+
+
+def test_reset_forgets_achievements(services, player):
+    services.reset(player)
+    assert services.repos.achievements.products(player) == {}

@@ -80,6 +80,15 @@ def _friends_reply() -> bytes:
     return pb.encode([(1, [(1, 2), (22, [(1, 1), (2, entry)])])])
 
 
+ACHIEVEMENTS = {1: 1_500_000_000, 4: 1_500_000_100, 15: 1_500_000_200}   # id -> unix time earned
+
+
+def _achievements_reply() -> bytes:
+    """Ubisoft's reply to Connect's achievements read (flat style, kind 3): the player's earned list."""
+    entries = [(1, [(1, i), (2, t)]) for i, t in ACHIEVEMENTS.items()]
+    return pb.encode([(1, 2), (3, [(1, PLAYER), (2, [(1, [(1, [(1, "STP"), (2, "PC")]), (2, entries)])])])])
+
+
 def _http(method, host, path, body, status=200):
     raw = json.dumps(body).encode()
     return {"method": method, "host": host, "path": path, "status": status,
@@ -121,7 +130,8 @@ def build(folder: Path) -> Path:
     demux = {"client_version": 13368,
              "patch_info": base64.b64encode(pb.encode([(1, 1), (5, 13368)])).decode(),
              "services": {"ownership_service": {"2": [base64.b64encode(_owned_games_reply()).decode()]},
-                          "friends_service": {"22": [base64.b64encode(_friends_reply()).decode()]}}}
+                          "friends_service": {"22": [base64.b64encode(_friends_reply()).decode()]},
+                          "ach_frontend": {"3": [base64.b64encode(_achievements_reply()).decode()]}}}
     (folder / "demux.json").write_text(json.dumps(demux))
 
     stats = [StatRow("level_stat:6:infinite", *encode_value(LEVEL)),

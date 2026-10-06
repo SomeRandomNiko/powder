@@ -8,6 +8,7 @@
   powder-server admin events [PLAYER] [-n N]        stat uploads from the game (XP, medals, unlocks)
   powder-server admin scores [PLAYER]               personal best per challenge
   powder-server admin entities [PLAYER]             profile entities (rider card, favorites)
+  powder-server admin achievements [PLAYER]         earned achievements
   powder-server admin import RECORDINGS_DIR [--replace]   your own recorded progress -> database (once)
   powder-server admin reset [PLAYER]                start over as a new player
   powder-server admin offers TEXT
@@ -17,6 +18,7 @@ PLAYER defaults to the configured default player.
 from __future__ import annotations
 
 import argparse
+import datetime
 from pathlib import Path
 
 from .. import trust as trustmod
@@ -51,6 +53,8 @@ def add_parser(sub) -> None:
     q = a.add_parser("scores", help="personal best per challenge")
     q.add_argument("player", nargs="?")
     q = a.add_parser("entities", help="profile entities (rider card, favorites)")
+    q.add_argument("player", nargs="?")
+    q = a.add_parser("achievements", help="earned achievements (as Ubisoft Connect reported them)")
     q.add_argument("player", nargs="?")
     q = a.add_parser("import", help="import your own recorded progress into the database (once)")
     q.add_argument("recordings", type=Path)
@@ -133,6 +137,11 @@ def run(args, config: Config) -> int:
     elif cmd == "scores":
         for e in s.repos.challenge_scores.all(pid):
             print(f"{e['challenge_id']:48s} {e['best_score']:>12g}  ({e['direction']}, {e['updated']})")
+    elif cmd == "achievements":
+        for product, n in s.repos.achievements.products(pid).items():
+            print(f"{product}: {n} earned")
+            for ach_id, ts in s.repos.achievements.all(pid, product).items():
+                print(f"  {ach_id:4d}  {datetime.datetime.fromtimestamp(ts, datetime.UTC):%Y-%m-%d %H:%M} UTC")
     elif cmd == "entities":
         for e in s.entities.for_profile(pid, limit=1000):
             print(f"{e['entityId']}  {e['type']:20s} rev {e['revision']:<4} {e['lastModified']}  "
@@ -146,7 +155,7 @@ def run(args, config: Config) -> int:
             s.db.close()
             return 1
         print(f"imported {r.name} ({r.profile_id}): {r.items} items, {r.credits} credits, {r.stats} stats, "
-              f"{r.entities} entities; now the default player")
+              f"{r.entities} entities, {r.achievements} achievements; now the default player")
     elif cmd == "reset":
         s.reset(pid)
         print(f"reset {pid}: starts as a new player on the next login")

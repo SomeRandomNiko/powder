@@ -124,6 +124,36 @@ class StatEventsRepo:
             "SELECT * FROM stat_events WHERE profile_id = ? ORDER BY id DESC LIMIT ?", (profile_id.lower(), limit))]
 
 
+class AchievementsRepo:
+    def __init__(self, db: Database):
+        self.db = db
+
+    def earn(self, profile_id: str, product: str, earned: dict[int, int]) -> int:
+        """Record {achievement id: unix time}; keeps the earliest time. Returns how many were new."""
+        before = len(self.all(profile_id, product))
+        with self.db.transaction():
+            for ach_id, ts in earned.items():
+                self.db.execute(
+                    "INSERT INTO achievements(profile_id, product, achievement_id, earned_at) VALUES (?,?,?,?) "
+                    "ON CONFLICT(profile_id, product, achievement_id) DO UPDATE SET "
+                    "earned_at = MIN(earned_at, excluded.earned_at)",
+                    (profile_id.lower(), product, int(ach_id), int(ts)))
+        return len(self.all(profile_id, product)) - before
+
+    def all(self, profile_id: str, product: str) -> dict[int, int]:
+        return {r["achievement_id"]: r["earned_at"] for r in self.db.execute(
+            "SELECT achievement_id, earned_at FROM achievements WHERE profile_id = ? AND product = ? "
+            "ORDER BY earned_at, achievement_id", (profile_id.lower(), product))}
+
+    def products(self, profile_id: str) -> dict[str, int]:
+        return {r["product"]: r["n"] for r in self.db.execute(
+            "SELECT product, COUNT(*) AS n FROM achievements WHERE profile_id = ? GROUP BY product",
+            (profile_id.lower(),))}
+
+    def clear(self, profile_id: str) -> None:
+        self.db.execute("DELETE FROM achievements WHERE profile_id = ?", (profile_id.lower(),))
+
+
 class ChallengeScoresRepo:
     def __init__(self, db: Database):
         self.db = db
@@ -235,3 +265,4 @@ class Repos:
         self.stat_events = StatEventsRepo(db)
         self.challenge_scores = ChallengeScoresRepo(db)
         self.entities = EntitiesRepo(db)
+        self.achievements = AchievementsRepo(db)

@@ -117,6 +117,7 @@ class Services:
         with self.db.transaction():
             self.repos.players.delete(profile_id)
             self.repos.entities.clear(profile_id)
+            self.repos.achievements.clear(profile_id)
 
     @classmethod
     def open(cls, config: Config, assets: Assets | None = None) -> "Services":

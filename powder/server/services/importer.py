@@ -8,10 +8,12 @@ From the recordings of their own sessions it takes:
                   reward reply after it (inventory-updates.json): the state at the END of the capture
   * statistics    the latest recorded NEX GetStatisticGroup_V1 reply (level, XP, medals)
   * entities      the player's recorded profile entities (rider card, favorites)
+  * achievements  the earned achievements Ubisoft returned to Connect (demux ach_frontend)
 and makes that player the default one. The server never reads the recordings while running.
 """
 from __future__ import annotations
 
+import base64
 import json
 import logging
 from dataclasses import dataclass
@@ -37,6 +39,7 @@ class ImportResult:
     credits: int
     stats: int
     entities: int
+    achievements: int = 0
 
 
 def _entities_in(body: bytes) -> list[dict]:
@@ -63,6 +66,7 @@ def import_recordings(services, recordings: Path, *, replace: bool = False) -> I
         with services.db.transaction():
             repos.players.delete(pid)
             repos.entities.clear(pid)
+            repos.achievements.clear(pid)
 
     with services.db.transaction():
         repos.players.create(pid, login.get("userId") or pid, login.get("nameOnPlatform") or f"Player-{pid[:4]}")
@@ -90,8 +94,32 @@ def import_recordings(services, recordings: Path, *, replace: bool = False) -> I
         repos.kv.set("server", "default_player", pid)
     body = rmc.latest("PlayerStats2Protocol::GetStatisticGroup_V1")
     n_stats = services.stats.import_group(pid, PROFILE_GROUP, body) if body else 0
+    n_ach = 0
+    for product, earned in _recorded_achievements(recordings / "demux.json", pid).items():
+        n_ach += repos.achievements.earn(pid, product, earned)
     result = ImportResult(pid, login.get("nameOnPlatform", ""), len(repos.inventory.all(pid)), credits,
-                          n_stats, n_entities)
-    log.info("imported %s (%s): %d items, %d credits, %d stats, %d entities", result.name, pid,
-             result.items, credits, n_stats, n_entities)
+                          n_stats, n_entities, n_ach)
+    log.info("imported %s (%s): %d items, %d credits, %d stats, %d entities, %d achievements", result.name,
+             pid, result.items, credits, n_stats, n_entities, n_ach)
+    return result
+
+
+def _recorded_achievements(demux_json: Path, pid: str) -> dict[str, dict[int, int]]:
+    """The player's earned achievements from Ubisoft's recorded replies to Connect (ach_frontend read)."""
+    from ..transport.demux import pb
+    from ..transport.demux.generated import earned_from, product_name
+    if not demux_json.exists():
+        return {}
+    replies = json.loads(demux_json.read_text(encoding="utf-8")).get("services", {}).get("ach_frontend", {})
+    result: dict[str, dict[int, int]] = {}
+    for b64 in replies.get("3", []):
+        body = pb.first(pb.try_decode(base64.b64decode(b64)) or [], 3)
+        fields = pb.try_decode(body) if isinstance(body, bytes) else None
+        if not fields or pb.text(fields, 1).lower() != pid:
+            continue
+        for num, products, _ in pb.decode(fields and pb.first(fields, 2, b"") or b""):
+            entry = pb.try_decode(products) if num == 1 and isinstance(products, bytes) else None
+            name = product_name(pb.first(entry, 1)) if entry else None
+            if name:
+                result.setdefault(name, {}).update(earned_from(pb.first(entry, 2, b"")))
     return result
