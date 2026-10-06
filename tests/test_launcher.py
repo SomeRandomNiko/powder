@@ -232,4 +232,5 @@ def test_console_restore_on_a_clean_pc(tmp_path, monkeypatch):
     from steeplauncher.__main__ import main
     FakePC(hosts=False, cas=0, connect=False).install(monkeypatch)
     (tmp_path / "launcher.toml").write_text("")
+    monkeypatch.setattr("builtins.input", lambda *a: "2")           # "Done", not "Start Ubisoft Connect"
     assert main(["-c", str(tmp_path / "launcher.toml"), "--restore"]) == 0
