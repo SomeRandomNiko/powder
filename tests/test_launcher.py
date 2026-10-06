@@ -199,12 +199,25 @@ def test_restore_undoes_hosts_and_certificates(tmp_path, monkeypatch):
     pc = FakePC()
     pc.install(monkeypatch)
     assert not footprint.scan(LauncherConfig()).clean
-    s = Scripted(LauncherConfig(), tmp_path, answers=["Quit Ubisoft Connect", "Start Ubisoft Connect"])
+    s = Scripted(LauncherConfig(), tmp_path, answers=["Quit Ubisoft Connect", "Remove entries", "Remove certificate",
+                                                       "Start Ubisoft Connect"])
     s.steps = restore_steps()
     s._run(s.restore_flow())
     assert pc.calls == [("quit connect",), ("hosts", "remove"), ("flush",), ("cert", "T0"), ("cert", "T1"),
                         ("start connect",)]
+    # every Windows prompt was announced: the step asked (and was answered) before the call
+    assert [k for k, _ in s.asked] == ["connect", "hosts", "cert", "check"]
     assert all(st.state == "ok" for st in s.steps) and footprint.scan(LauncherConfig()).clean
+
+
+def test_restore_skip_means_no_windows_prompt(tmp_path, monkeypatch):
+    from steeplauncher.session import FAILED, restore_steps
+    pc = FakePC(connect=False)
+    pc.install(monkeypatch)
+    s = Scripted(LauncherConfig(), tmp_path, answers=["Skip", "Skip"])
+    s.steps = restore_steps()
+    s._run(s.restore_flow())
+    assert pc.calls == [] and s.step("hosts").state == FAILED and s.step("cert").state == FAILED
 
 
 def test_restore_on_a_clean_pc_changes_nothing(tmp_path, monkeypatch):
@@ -221,7 +234,7 @@ def test_restore_declined_uac_is_reported(tmp_path, monkeypatch):
     from steeplauncher.session import FAILED, restore_steps
     pc = FakePC(cas=0, connect=False)
     pc.install(monkeypatch, uac_ok=False)
-    s = Scripted(LauncherConfig(), tmp_path, answers=["Try again", "Skip"])
+    s = Scripted(LauncherConfig(), tmp_path, answers=["Remove entries", "Try again", "Skip"])
     s.steps = restore_steps()
     s._run(s.restore_flow())
     assert [c for c in pc.calls if c[0] == "hosts"] == [("hosts", "remove")] * 2

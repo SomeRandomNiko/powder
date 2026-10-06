@@ -1,4 +1,7 @@
-"""Run one command elevated (UAC) and wait for it. Used only for the hosts-file change."""
+"""Run one command elevated (UAC) and wait for it. Used only for the hosts-file change.
+
+Rule: call this only after the user was told why admin rights are needed and pressed a button for it
+(see HOSTS_ADMIN_WHY in session.py); a UAC prompt must never appear out of nowhere."""
 from __future__ import annotations
 
 import ctypes

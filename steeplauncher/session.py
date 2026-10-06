@@ -26,6 +26,12 @@ log = logging.getLogger("steeplauncher")
 
 PENDING, RUNNING, OK, ACTION, FAILED = "pending", "running", "ok", "action", "failed"
 
+# Rule: every Windows prompt (UAC, certificate dialogs) is announced first with why it is needed, and only
+# appears after the user presses a button for it.
+HOSTS_ADMIN_WHY = ("Changing the hosts file needs admin rights because it is a protected Windows system file: "
+                   "when you click \"{button}\", Windows asks for permission (UAC). Only these lines are {verb}, "
+                   "and the current file is backed up first.")
+
 
 @dataclass
 class Step:
@@ -182,8 +188,10 @@ class Session:
                 return True
             wrong = ", ".join(f"{s.host} -> {', '.join(s.resolved) or 'nothing'}" for s in bad[:3])
             choice = self.ask("dns", f"{len(bad)} hostname(s) do not point at the server ({wrong}"
-                              f"{', ...' if len(bad) > 3 else ''}). Add these lines to your hosts file or "
-                              "to your own DNS server:", ["Add to hosts file", "Check again"],
+                              f"{', ...' if len(bad) > 3 else ''}). Add these lines to your own DNS server, or let "
+                              "the launcher add them to the hosts file. "
+                              + HOSTS_ADMIN_WHY.format(button="Add to hosts file", verb="added"),
+                              ["Add to hosts file", "Check again"],
                               details=dns.lines_for_display(addr))
             if choice == "Add to hosts file":
                 code = elevate.hosts("add", addr, str(self.data_dir / "hosts-backups"))
@@ -312,8 +320,15 @@ class Session:
         return True
 
     def restore_hosts(self) -> bool:
+        lines = footprint.hosts_lines()
+        if lines and self.ask("hosts", "The hosts file has the launcher's redirect entries, which point the Ubisoft "
+                              "hostnames at the server. "
+                              + HOSTS_ADMIN_WHY.format(button="Remove entries", verb="removed"),
+                              ["Remove entries", "Skip"], details="\n".join(lines)) == "Skip":
+            self.set("hosts", FAILED, "skipped: the redirect entries are still in the hosts file")
+            return True
         while footprint.hosts_lines():
-            self.set("hosts", RUNNING, "removing the redirect entries (Windows asks for admin rights)")
+            self.set("hosts", RUNNING, "removing the redirect entries (waiting for the Windows admin prompt)")
             backups = self.data_dir / "hosts-backups"
             code = elevate.hosts("remove", self.cfg.server_address, str(backups))
             if code == 0:
@@ -334,9 +349,15 @@ class Session:
         if not cas:
             self.set("cert", OK, "no server certificate installed")
             return True
+        if self.ask("cert", f"Windows trusts the server's certificate for your user ({len(cas)} installed). Removing "
+                    "it needs no admin rights, but when you click \"Remove certificate\", Windows asks you to confirm "
+                    f"in its own dialog ({'once per certificate; ' if len(cas) > 1 else ''}answer Yes).",
+                    ["Remove certificate", "Skip"]) == "Skip":
+            self.set("cert", FAILED, "skipped: the server's certificate is still trusted")
+            return True
         for thumb, _ in cas:
             while True:
-                self.set("cert", RUNNING, "removing the server's certificate (Windows asks to confirm)")
+                self.set("cert", RUNNING, "removing the server's certificate (waiting for the Windows dialog)")
                 try:
                     trust.remove_thumbprint(thumb)
                     break
@@ -371,11 +392,16 @@ class Session:
             self.armer.terminate()
         self.armer = None
 
-    def stop(self) -> None:
-        """The launcher closes: undo what it set up."""
+    @property
+    def hosts_removal_on_exit(self) -> bool:
+        """Closing would take the hosts entries out again (needs a UAC prompt, so the UI asks first)."""
+        return self.cfg.remove_hosts_on_exit and self.hosts_added
+
+    def stop(self, remove_hosts: bool = True) -> None:
+        """The launcher closes: undo what it set up (the hosts entries only if the user agreed)."""
         self.cancel.set()
         self.end_game()
-        if self.cfg.remove_hosts_on_exit and self.hosts_added:
+        if remove_hosts and self.hosts_removal_on_exit:
             elevate.hosts("remove", self.cfg.server_address, str(self.data_dir / "hosts-backups"))
             self.hosts_added = False
         if self.server_proc:

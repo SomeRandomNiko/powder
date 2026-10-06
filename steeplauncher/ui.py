@@ -3,7 +3,7 @@ Deliberately simple (functionality first)."""
 from __future__ import annotations
 
 import tkinter as tk
-from tkinter import ttk
+from tkinter import messagebox, ttk
 
 from .session import ACTION, FAILED, OK, PENDING, RUNNING, Session
 
@@ -57,7 +57,15 @@ class LauncherWindow:
         self.root.clipboard_append(text)
 
     def quit(self) -> None:
-        self.session.stop()
+        remove = True
+        if self.session.hosts_removal_on_exit:          # announce the UAC prompt before it appears
+            remove = messagebox.askyesnocancel(
+                "Powder", "Remove the hosts-file entries again before closing (remove_hosts_on_exit)?\n\n"
+                "The hosts file is a protected Windows system file, so Windows asks for admin rights (UAC) "
+                "after you click Yes.\n\nNo: close and keep the entries. Cancel: don't close.")
+            if remove is None:
+                return
+        self.session.stop(remove_hosts=remove)
         self.root.destroy()
 
     def run(self) -> None:

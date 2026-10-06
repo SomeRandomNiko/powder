@@ -10,8 +10,9 @@ from steepserver import trust
 EXPLANATION = (
     "Ubisoft Connect only talks to servers whose certificate Windows trusts. The server has its own small "
     "certificate authority that is technically limited to Ubisoft's domains, so it cannot vouch for any "
-    "other website. It is added for your Windows user only (no admin rights) and can be removed any time "
-    "with 'steepserver admin trust remove'.")
+    "other website. It is added for your Windows user only (no admin rights). When you click \"Install "
+    "certificate\", Windows shows a security warning asking you to confirm it; answer Yes. Restore system "
+    "removes it again.")
 
 
 def save_ca(pem: bytes, data_dir: Path) -> Path:
