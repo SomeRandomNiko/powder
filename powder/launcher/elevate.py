@@ -6,8 +6,9 @@ from __future__ import annotations
 
 import ctypes
 import subprocess
-import sys
 from ctypes import wintypes
+
+from .. import paths
 
 SEE_MASK_NOCLOSEPROCESS = 0x40
 SW_HIDE = 0
@@ -21,14 +22,14 @@ class SHELLEXECUTEINFO(ctypes.Structure):
                 ("dwHotKey", wintypes.DWORD), ("hIconOrMonitor", wintypes.HANDLE), ("hProcess", wintypes.HANDLE)]
 
 
-def run_elevated(args: list[str]) -> int:
-    """Run `python <args>` elevated; returns its exit code, or -1 if the user declined UAC."""
+def run_elevated(cmd: list[str]) -> int:
+    """Run `cmd` (program + arguments) elevated; returns its exit code, or -1 if the user declined UAC."""
     info = SHELLEXECUTEINFO()
     info.cbSize = ctypes.sizeof(info)
     info.fMask = SEE_MASK_NOCLOSEPROCESS
     info.lpVerb = "runas"
-    info.lpFile = sys.executable
-    info.lpParameters = subprocess.list2cmdline(args)
+    info.lpFile = cmd[0]
+    info.lpParameters = subprocess.list2cmdline(cmd[1:])
     info.nShow = SW_HIDE
     if not ctypes.windll.shell32.ShellExecuteExW(ctypes.byref(info)):
         return -1                                  # declined (ERROR_CANCELLED) or failed to start
@@ -40,4 +41,4 @@ def run_elevated(args: list[str]) -> int:
 
 
 def hosts(action: str, address: str, backup_dir: str) -> int:
-    return run_elevated(["-m", "powder.launcher.hostsfix", action, "--address", address, "--backup-dir", backup_dir])
+    return run_elevated(paths.self_command("hostsfix", action, "--address", address, "--backup-dir", backup_dir))

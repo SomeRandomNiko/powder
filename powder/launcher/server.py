@@ -6,11 +6,11 @@ from __future__ import annotations
 import json
 import ssl
 import subprocess
-import sys
 import time
 import urllib.request
 from pathlib import Path
 
+from .. import paths
 from .config import LauncherConfig
 
 
@@ -25,7 +25,7 @@ class ServerProcess:
         self.log_path = log_dir / "server-console.log"
         out = open(self.log_path, "ab")
         self.proc = subprocess.Popen(
-            [sys.executable, "-m", "powder.server", "-c", str(self.cfg.server_config_path()), "run"],
+            paths.self_command("server", "-c", str(self.cfg.server_config_path()), "run"),
             stdout=out, stderr=subprocess.STDOUT,
             creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
 

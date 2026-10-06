@@ -1,4 +1,4 @@
-"""uv run powder [-c launcher.toml] [--status | --restore]"""
+"""powder [-c launcher.toml] [--status | --restore [--window]]"""
 from __future__ import annotations
 
 import argparse
@@ -6,6 +6,8 @@ import logging
 import sys
 from pathlib import Path
 
+from .. import paths
+from ..version import __version__
 from .config import LauncherConfig
 from .session import Session, restore_steps
 
@@ -22,21 +24,29 @@ class ConsoleSession(Session):
             if pick.isdigit() and 1 <= int(pick) <= len(actions):
                 return actions[int(pick) - 1]
 
+    def pick_file(self, title: str) -> Path | None:
+        typed = input(f"{title} (path, empty to cancel): ").strip().strip('"')
+        return Path(typed) if typed else None
+
 
 def main(argv: list[str] | None = None) -> int:
     p = argparse.ArgumentParser(prog="powder")
-    p.add_argument("-c", "--config", type=Path, default=Path("launcher.toml"))
+    p.add_argument("-c", "--config", type=Path, default=paths.user_root() / "launcher.toml")
     mode = p.add_mutually_exclusive_group()
     mode.add_argument("--status", action="store_true", help="show what the launcher has set up on this PC")
-    mode.add_argument("--restore", action="store_true", help="undo it (hosts entries, certificate) in the console")
+    mode.add_argument("--restore", action="store_true", help="undo it (hosts entries, certificate)")
+    p.add_argument("--window", action="store_true", help="with --restore: in a window instead of the console")
+    p.add_argument("--version", action="version", version=f"Powder {__version__}")
     args = p.parse_args(argv)
     cfg = LauncherConfig.load(args.config)
-    data_dir = (cfg.path.resolve().parent if cfg.path else Path.cwd()) / "data" / "launcher"
+    data_dir = (cfg.path.resolve().parent if cfg.path else paths.user_root()) / "data" / "launcher"
     (data_dir / "logs").mkdir(parents=True, exist_ok=True)
-    handlers: list[logging.Handler] = [logging.FileHandler(data_dir / "logs" / "launcher.log", encoding="utf-8"),
-                                       logging.StreamHandler(sys.stdout)]
+    handlers: list[logging.Handler] = [logging.FileHandler(data_dir / "logs" / "launcher.log", encoding="utf-8")]
+    if sys.stdout is not None and not args.status:   # the windowed Powder.exe has no console
+        handlers.append(logging.StreamHandler(sys.stdout))
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)-7s %(name)s %(message)s",
-                        handlers=handlers if not args.status else handlers[:1])
+                        handlers=handlers)
+    logging.getLogger("powder.launcher").info("Powder %s", __version__)
     if args.status:
         from .footprint import scan
         fp = scan(cfg)
@@ -44,14 +54,15 @@ def main(argv: list[str] | None = None) -> int:
         print("nothing of the launcher's is set up" if fp.clean else
               "use --restore (or Restore system... in the launcher) to undo it")
         return 0
-    if args.restore:
+    if args.restore and not args.window:
         s = ConsoleSession(cfg, data_dir)
         s.steps = restore_steps()
         s._run(s.restore_flow())
         return 0 if all(st.state == "ok" for st in s.steps) else 1
     from .ui import LauncherWindow
-    LauncherWindow(Session(cfg, data_dir)).run()
-    return 0
+    session = Session(cfg, data_dir)
+    LauncherWindow(session, restore_only=args.restore).run()
+    return 0 if not args.restore or all(st.state == "ok" for st in session.steps) else 1
 
 
 if __name__ == "__main__":

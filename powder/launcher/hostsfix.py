@@ -1,6 +1,6 @@
 """The only admin step: add or remove the redirect block in the hosts file.
 
-Run elevated by elevate.py:  python -m powder.launcher.hostsfix add|remove --address A --backup-dir D
+Run elevated by elevate.py:  powder hostsfix add|remove --address A --backup-dir D
 Never truncates: backs the file up, writes a temp file, swaps it in (retrying while another process
 holds the file), then verifies the content. Exit code 0 = done.
 """

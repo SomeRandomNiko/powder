@@ -3,38 +3,75 @@ Steep version) / Restore system / Logs / Quit.
 Deliberately simple (functionality first)."""
 from __future__ import annotations
 
+import ctypes
+import threading
 import tkinter as tk
-from tkinter import messagebox, ttk
+from pathlib import Path
+from tkinter import filedialog, messagebox, ttk
 
+from ..version import __version__
 from .session import ACTION, FAILED, OK, PENDING, RUNNING, Session, play_buttons
 
 ICONS = {PENDING: "·", RUNNING: "…", OK: "✔", ACTION: "?", FAILED: "✖"}
 COLORS = {PENDING: "gray", RUNNING: "blue", OK: "green", ACTION: "darkorange", FAILED: "red"}
 
 
+MUTEX_NAME = "PowderLauncher"          # the installer checks it (AppMutex) to ask for Powder to be closed
+
+
+def _hold_mutex():
+    """A named mutex for as long as the window is open; None outside Windows."""
+    try:
+        return ctypes.windll.kernel32.CreateMutexW(None, False, MUTEX_NAME)
+    except AttributeError:
+        return None
+
+
 class LauncherWindow:
-    def __init__(self, session: Session):
+    def __init__(self, session: Session, restore_only: bool = False):
+        """restore_only: just Restore system (the uninstaller runs this); no Play buttons."""
         self.session = session
+        self.restore_only = restore_only
+        self.mutex = _hold_mutex()
         self.root = tk.Tk()
-        self.root.title("Powder")
+        self.root.title(f"Powder {__version__}" + (" - Restore system" if restore_only else ""))
         self.root.geometry("760x520")
         self.root.protocol("WM_DELETE_WINDOW", self.quit)
         session.on_update = lambda: self.root.after(0, self.render)
+        session.pick_file = self.pick_file
 
         top = ttk.Frame(self.root, padding=8)
         top.pack(fill="x")
         self.play_bar = ttk.Frame(top)                  # one Play button per installed version
         self.play_bar.pack(side="left")
         self.shown_buttons: list[str] | None = None
-        ttk.Button(top, text="Restore system…", command=session.restore).pack(side="left", padx=6)
+        if not restore_only:
+            ttk.Button(top, text="Restore system…", command=session.restore).pack(side="left", padx=6)
         ttk.Button(top, text="Open logs", command=session.open_logs).pack(side="left")
-        ttk.Button(top, text="Quit", command=self.quit).pack(side="right")
+        ttk.Button(top, text="Close" if restore_only else "Quit", command=self.quit).pack(side="right")
 
         self.body = ttk.Frame(self.root, padding=8)
         self.body.pack(fill="both", expand=True)
         self.render()
+        if restore_only:
+            self.root.after(100, session.restore)
+
+    def pick_file(self, title: str) -> Path | None:
+        """Called from the session's worker thread: show the dialog on the Tk thread and wait for it."""
+        done, result = threading.Event(), {}
+
+        def show():
+            name = filedialog.askopenfilename(parent=self.root, title=title,
+                                              filetypes=[("Game-data pack", "*.zip"), ("All files", "*.*")])
+            result["path"] = Path(name) if name else None
+            done.set()
+        self.root.after(0, show)
+        done.wait()
+        return result["path"]
 
     def render_play_buttons(self) -> None:
+        if self.restore_only:
+            return
         buttons = play_buttons(self.session.installs)
         if [label for label, _ in buttons] == self.shown_buttons:
             return

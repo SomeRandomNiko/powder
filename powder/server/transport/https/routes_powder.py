@@ -9,9 +9,8 @@ from __future__ import annotations
 
 from aiohttp import web
 
+from ....version import __version__
 from .keys import CA_PEM, HOW, SERVICES
-
-SERVER_VERSION = "0.4"
 
 
 async def status(request: web.Request) -> web.Response:
@@ -20,8 +19,8 @@ async def status(request: web.Request) -> web.Response:
                for c in services.connect_clients if c.profile_id]
     game = [{"player": s.player.name, "nex": s.nex is not None}
             for s in services.sessions.by_player.values() if s.nex is not None]
-    request[HOW] = "steep-status"
-    return web.json_response({"server": "powder", "version": SERVER_VERSION,
+    request[HOW] = "powder-status"
+    return web.json_response({"server": "powder", "version": __version__,
                               "players": len(services.repos.players.all()),
                               "connect": connect, "game": game})
 

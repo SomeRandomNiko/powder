@@ -86,6 +86,10 @@ class Session:
         self.chosen: locate.Install | None = None              # the one the user pressed Play for
         self.install: locate.Install | None = None             # the one being played (after check_files)
 
+    def pick_file(self, title: str) -> Path | None:
+        """Ask the user for a file; the window and the console replace this."""
+        return None
+
     def detect(self) -> list[locate.Install]:
         self.installs = locate.find_installs(self.cfg.steam_app_id, self.cfg.steep_exe)
         return self.installs

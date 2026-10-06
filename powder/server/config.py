@@ -73,10 +73,10 @@ class Config:
 
     @classmethod
     def load(cls, path: Path | None) -> "Config":
-        if path is None or not path.exists():
-            return cls(server=ServerConfig(data_dir=Path("data").resolve(),
-                                           gamedata_dir=Path("gamedata").resolve(),
-                                           recordings_dir=Path("recordings").resolve()), path=path)
+        if path is None or not path.exists():                # defaults, next to where the file would be
+            base = path.resolve().parent if path is not None else Path.cwd()
+            return cls(server=ServerConfig(data_dir=base / "data", gamedata_dir=base / "gamedata",
+                                           recordings_dir=base / "recordings"), path=path)
         raw = tomllib.loads(path.read_text(encoding="utf-8"))
         base = path.resolve().parent
 
