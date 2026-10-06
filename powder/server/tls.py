@@ -37,9 +37,9 @@ CRL_PATH = "/powder-ca.crl"
 CRL_URL = f"http://{CRL_HOST}{CRL_PATH}"                 # plain HTTP on port 80 of the server: a redirected
                                                          # hostname, so it works wherever the server runs
 LEGACY_CRL_PATHS = ("/steep-ca.crl",)                    # still served (before the rename to Powder)
-CA_NAME = "Powder local CA"
+CA_NAME = "Powder (Steep) local CA"                      # what users see in Windows' certificate manager
 LEGACY_CA_NAMES = ("steepserver local CA",)              # CAs generated before the rename keep their name
-SERVER_ORG = "Powder (local)"
+SERVER_ORG = "Powder (Steep)"
 
 _DAY = datetime.timedelta(days=1)
 CA_LIFETIME = 3650 * _DAY

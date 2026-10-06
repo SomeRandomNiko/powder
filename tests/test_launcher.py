@@ -215,8 +215,8 @@ def test_session_ask_waits_for_choice(tmp_path):
 STORE = """Root "Trusted Root Certification Authorities"
 ================ Certificate 0 ================
 Serial Number: 01
-Issuer: O=Powder (local), CN=Powder local CA
-Subject: O=Powder (local), CN=Powder local CA
+Issuer: O=Powder (Steep), CN=Powder (Steep) local CA
+Subject: O=Powder (Steep), CN=Powder (Steep) local CA
 Cert Hash(sha1): aa bb cc dd
 ================ Certificate 1 ================
 Serial Number: 02
@@ -246,7 +246,7 @@ class FakePC:
 
     def __init__(self, hosts=True, cas=2, connect=True, game=False):
         self.hosts = ["# marker", "127.0.0.1 public-ubiservices.ubi.com"] if hosts else []
-        self.cas = [(f"T{i}", "CN=Powder local CA") for i in range(cas)]
+        self.cas = [(f"T{i}", "CN=Powder (Steep) local CA") for i in range(cas)]
         self.connect, self.game, self.calls = connect, game, []
 
     def install(self, monkeypatch, uac_ok=True):
