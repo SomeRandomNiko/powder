@@ -7,7 +7,7 @@ import sys
 from pathlib import Path
 
 from .config import LauncherConfig
-from .session import Session
+from .session import Session, restore_steps
 
 
 class ConsoleSession(Session):
@@ -41,10 +41,12 @@ def main(argv: list[str] | None = None) -> int:
         from .footprint import scan
         fp = scan(cfg)
         print("\n".join(fp.lines()))
-        print("nothing of the launcher's is set up" if fp.clean else "use --restore (or Restore system... in the launcher) to undo it")
+        print("nothing of the launcher's is set up" if fp.clean else
+              "use --restore (or Restore system... in the launcher) to undo it")
         return 0
     if args.restore:
         s = ConsoleSession(cfg, data_dir)
+        s.steps = restore_steps()
         s._run(s.restore_flow())
         return 0 if all(st.state == "ok" for st in s.steps) else 1
     from .ui import LauncherWindow

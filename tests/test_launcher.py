@@ -226,3 +226,10 @@ def test_restore_declined_uac_is_reported(tmp_path, monkeypatch):
     s._run(s.restore_flow())
     assert [c for c in pc.calls if c[0] == "hosts"] == [("hosts", "remove")] * 2
     assert s.step("hosts").state == FAILED and s.step("check").state == FAILED
+
+
+def test_console_restore_on_a_clean_pc(tmp_path, monkeypatch):
+    from steeplauncher.__main__ import main
+    FakePC(hosts=False, cas=0, connect=False).install(monkeypatch)
+    (tmp_path / "launcher.toml").write_text("")
+    assert main(["-c", str(tmp_path / "launcher.toml"), "--restore"]) == 0
