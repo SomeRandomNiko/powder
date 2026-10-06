@@ -6,8 +6,8 @@ import pytest
 from aiohttp.test_utils import TestClient, TestServer
 
 import synthetic as syn
-from steepserver.constants import CREDITS_ITEM, SPACE_ID
-from steepserver.transport.https.app import build_app
+from powder.server.constants import CREDITS_ITEM, SPACE_ID
+from powder.server.transport.https.app import build_app
 
 UBI = {"Host": syn.UBI}
 
@@ -31,7 +31,7 @@ async def test_login_issues_our_ticket_for_the_default_player(client, services):
     body = await login(client)
     assert body["profileId"] == syn.PLAYER and body["nameOnPlatform"] == syn.PLAYER_NAME
     assert body["spaceId"] == SPACE_ID and body["ticket"] != "recorded-ticket"
-    assert body["ticket"].startswith("steep.") and services.sessions.by_token(body["ticket"])
+    assert body["ticket"].startswith("powder.") and services.sessions.by_token(body["ticket"])
 
 
 CONNECT_APP = "f68a4bb5-608a-4ff2-8123-be8ef797e0a6"
@@ -136,7 +136,7 @@ async def test_personal_endpoints_are_generated_not_replayed(client):
     """Account details, friends and Club actions come from the player record: nothing of the recorded
     account (email, friends, action progress) is ever served."""
     me = await (await client.get("/v3/users/me", headers=UBI)).json()
-    assert me["nameOnPlatform"] == syn.PLAYER_NAME and me["email"].endswith("@steepserver.invalid")
+    assert me["nameOnPlatform"] == syn.PLAYER_NAME and me["email"].endswith("@powder.invalid")
     assert me["email"] != syn.PLAYER_EMAIL and me["phone"]["number"] == ""
     friends = await (await client.get(f"/v3/profiles/{syn.PLAYER}/friends", headers=UBI)).json()
     assert friends["friends"] == []

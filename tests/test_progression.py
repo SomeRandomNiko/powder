@@ -3,14 +3,14 @@ import pytest
 from aiohttp.test_utils import TestClient, TestServer
 
 import synthetic as syn
-from steepserver.services.importer import import_recordings
-from steepserver.config import Config, ServerConfig
-from steepserver.db.database import MIGRATIONS_DIR, Database, _split_sql
-from steepserver.services import Services
-from steepserver.services.stats import LEVEL_KEY, StatEvent
-from steepserver.transport.https.app import build_app
-from steepserver.transport.nex.handlers.stats import decode_events
-from steepserver.transport.nex.rmc_codec import (V_BOOL, V_DOUBLE, V_INT64, V_STRING, V_UINT64, Reader,
+from powder.server.services.importer import import_recordings
+from powder.server.config import Config, ServerConfig
+from powder.server.db.database import MIGRATIONS_DIR, Database, _split_sql
+from powder.server.services import Services
+from powder.server.services.stats import LEVEL_KEY, StatEvent
+from powder.server.transport.https.app import build_app
+from powder.server.transport.nex.handlers.stats import decode_events
+from powder.server.transport.nex.rmc_codec import (V_BOOL, V_DOUBLE, V_INT64, V_STRING, V_UINT64, Reader,
                                                  Writer, read_variant, write_variant)
 
 
@@ -101,7 +101,7 @@ def test_challenge_personal_best(services, player):
 
 
 def test_existing_phase1_database_is_migrated(tmp_path):
-    path = tmp_path / "data" / "steep.db"
+    path = tmp_path / "data" / "powder.db"
     db = Database(path)
     for stmt in _split_sql((MIGRATIONS_DIR / "0001_init.sql").read_text()):   # a Phase 1 database
         db.execute(stmt)

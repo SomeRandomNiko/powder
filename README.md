@@ -10,10 +10,10 @@ repository contains no game files and no data from Ubisoft's servers.
 
 ## What it does
 
-- **Server** (`steepserver`): one process that answers the game and Ubisoft Connect in place of Ubisoft:
+- **Server** (`powder-server`): one process that answers the game and Ubisoft Connect in place of Ubisoft:
   the UbiServices HTTPS API (all `*.ubi.com` hosts, port 443), the Quazal NEX/RendezVous server
   (UDP 6005) and Ubisoft Connect's demux protocol. Player state lives in SQLite.
-- **Launcher** (`steep-launcher`): checks and sets up everything on the PC with the game (server, DNS,
+- **Launcher** (`powder`): checks and sets up everything on the PC with the game (server, DNS,
   certificate, Ubisoft Connect) and starts Steep online against the server.
 
 What persists per player: inventory and credits (store purchases, challenge rewards), progression
@@ -24,8 +24,8 @@ best per challenge, and profile entities (rider card, favorites).
 
 ```
 native\build.ps1                        # once: builds the TLS helper (needs zig)
-uv run steep-launcher                   # everything: server, DNS check, certificate, Connect, game
-uv run steepserver run                  # the server alone (uses ./config.toml, see config.example.toml)
+uv run powder                   # everything: server, DNS check, certificate, Connect, game
+uv run powder-server run                  # the server alone (uses ./config.toml, see config.example.toml)
 uv run pytest
 ```
 
@@ -40,8 +40,8 @@ product entries for Ubisoft Connect. That data is not in this repository. It com
 built from recordings of your own online sessions:
 
 ```
-uv run steepserver gamedata build <recordings> gamedata    # allow-list + privacy check
-uv run steepserver gamedata verify                         # manifest + file hashes
+uv run powder-server gamedata build <recordings> gamedata    # allow-list + privacy check
+uv run powder-server gamedata verify                         # manifest + file hashes
 ```
 
 The builder copies only allow-listed, game-wide replies. Before writing the pack it collects every
@@ -55,8 +55,8 @@ A player who logs in for the first time starts like a new Ubisoft account: level
 `starting_credits`. To continue with your own progress, import it once from your recordings:
 
 ```
-uv run steepserver admin import <recordings>      # level, credits, items, stats, rider card
-uv run steepserver admin import <recordings> --replace
+uv run powder-server admin import <recordings>      # level, credits, items, stats, rider card
+uv run powder-server admin import <recordings> --replace
 ```
 
 After the import the server never reads the recordings again. Recordings contain personal data (your
@@ -65,7 +65,7 @@ repository depends on it.
 
 ## Launcher
 
-`steep-launcher` (Windows, runs on the PC with the game; settings in `launcher.toml`, see
+`powder` (Windows, runs on the PC with the game; settings in `launcher.toml`, see
 `launcher.example.toml`) works with both versions of Steep: the **Steam** version and the **Ubisoft
 Connect** version. It finds them wherever they are installed, from what Steam (its libraries and app
 manifest) and Ubisoft Connect (its install records) note about them. With both installed it shows
@@ -75,7 +75,7 @@ these steps; each step only checks unless something is missing:
 1. **Game files**: finds the chosen Steep, Ubisoft Connect (and Steam for the Steam version), and checks
    that `Steep.exe` is a build the TLS helper supports.
 2. **Server**: reaches it, or starts it locally.
-3. **DNS**: every Ubisoft hostname (`steepserver/hostnames.py`) must resolve to the server address. If not,
+3. **DNS**: every Ubisoft hostname (`powder/server/hostnames.py`) must resolve to the server address. If not,
    it shows the lines to add to your hosts file or to your own DNS server, and offers to add them to the
    hosts file (one UAC prompt; the previous hosts file is backed up to `data/launcher/hosts-backups/`).
 4. **Certificate**: gets the server's CA and, if Windows doesn't trust it yet, explains and installs it
@@ -87,7 +87,7 @@ these steps; each step only checks unless something is missing:
 The TLS helper makes the game accept the server's certificate: `native/hook_guard.dll` traps the game's
 certificate check without changing code bytes at first, `native/armer.exe` keeps that trap armed and then
 patches the check once the game's integrity check is over. It only fits the `Steep.exe` builds listed in
-`steeplauncher/game.py` (the Steam and the Ubisoft Connect download of the final update: the same
+`powder/launcher/game.py` (the Steam and the Ubisoft Connect download of the final update: the same
 compiled game, packaged differently). Game files are never modified on disk.
 
 ### Restoring your PC
@@ -99,14 +99,14 @@ asks to confirm). Each step only acts if something is there, so it is safe to ru
 everything up again. The same from a console:
 
 ```
-uv run steep-launcher --status      # what is set up right now
-uv run steep-launcher --restore     # undo it
+uv run powder --status      # what is set up right now
+uv run powder --restore     # undo it
 ```
 
 Your data (`data/`, the game-data pack) is kept. Game files are never changed, so there is nothing to
 undo there.
 
-Runtime files go to `data/` (`steep.db`, `logs/server.log`, `bodies/` = logs the game uploads,
+Runtime files go to `data/` (`powder.db`, `logs/server.log`, `bodies/` = logs the game uploads,
 `tls/` = local CA and server certificate, `nex_signing_key.pem`; all generated on first run).
 
 ## Progression
@@ -132,34 +132,34 @@ offline mode. So the server also stands in for what Connect needs:
   never prompts to sync.
 - **Certificates**: Connect checks them through Windows, so the server generates a local CA in
   `data/tls/`, restricted by name constraints to `ubi.com` / `ubisoft.com` / loopback, and serves its
-  revocation list on `http://public-ubiservices.ubi.com/steep-ca.crl` (port 80). The launcher installs
+  revocation list on `http://public-ubiservices.ubi.com/powder-ca.crl` (port 80). The launcher installs
   it for you; by hand:
 
 ```
-uv run steepserver admin trust install    # current user's trusted roots; Windows asks to confirm
-uv run steepserver admin trust status
-uv run steepserver admin trust remove
+uv run powder-server admin trust install    # current user's trusted roots; Windows asks to confirm
+uv run powder-server admin trust status
+uv run powder-server admin trust remove
 ```
 
 Not emulated yet: storing cloud saves, leaderboards (empty), and the news / free games pages of
 Connect's UI.
 
-The server's own endpoints: `GET /_steep/status` (connected Connect clients and game sessions) and
-`GET /_steep/ca.pem` (the CA certificate). No authentication yet: meant for a LAN/VPN of friends.
+The server's own endpoints: `GET /_powder/status` (connected Connect clients and game sessions) and
+`GET /_powder/ca.pem` (the CA certificate). No authentication yet: meant for a LAN/VPN of friends.
 
 ## Admin
 
 ```
-uv run steepserver admin players
-uv run steepserver admin inventory              # item count + credits of the default player
-uv run steepserver admin grant credits 50000
-uv run steepserver admin stats --key level
-uv run steepserver admin ledger
-uv run steepserver admin offers armada          # search the store catalogue
-uv run steepserver admin events                 # recent progress uploads from the game
-uv run steepserver admin scores                 # personal best per challenge
-uv run steepserver admin entities               # rider card, favorites
-uv run steepserver admin reset                  # the player starts again as a new player
+uv run powder-server admin players
+uv run powder-server admin inventory              # item count + credits of the default player
+uv run powder-server admin grant credits 50000
+uv run powder-server admin stats --key level
+uv run powder-server admin ledger
+uv run powder-server admin offers armada          # search the store catalogue
+uv run powder-server admin events                 # recent progress uploads from the game
+uv run powder-server admin scores                 # personal best per challenge
+uv run powder-server admin entities               # rider card, favorites
+uv run powder-server admin reset                  # the player starts again as a new player
 ```
 
 ## How a request is answered
@@ -174,7 +174,7 @@ uv run steepserver admin reset                  # the player starts again as a n
 ## Layout
 
 ```
-steepserver/
+powder/server/
   app.py              starts HTTPS + NEX on one event loop
   config.py           config.toml -> Config; gameplay toggles per player
   constants.py        game-wide ids: app, space, credits item
@@ -187,12 +187,12 @@ steepserver/
   hostnames.py        the Ubisoft hostnames that must resolve to the server
   trust.py            local CA in Windows' trusted roots (admin CLI + launcher)
   transport/tls_router.py  one TLS port: demux or HTTPS by requested hostname
-  transport/https/    aiohttp app, UbiServices + generated profile routes, /_steep/, WebSocket, CRL site
+  transport/https/    aiohttp app, UbiServices + generated profile routes, /_powder/, WebSocket, CRL site
   transport/demux/    Ubisoft Connect's demux protocol (protobuf, per-service replies)
   transport/nex/      PRUDP, secure channel, RMC codec, dispatcher, per-protocol handlers
   plugins/            plugin API + loader
   admin/              CLI
-steeplauncher/        the launcher (Tkinter)
+powder/launcher/      the launcher (Tkinter)
 native/               TLS helper (C, built with zig)
 plugins/              your plugins (_example.py shows the API)
 tests/                pytest; synthetic.py = made-up recordings and pack used by the tests
@@ -205,7 +205,7 @@ tests/                pytest; synthetic.py = made-up recordings and pack used by
   `ctx.services`, `ctx.conn`. Raise `Fallthrough` to use the pack's reply instead.
 - **New HTTPS endpoint**: add a route in `transport/https/routes_*.py`; keep logic in `services/`.
 - **Schema change**: add `db/migrations/000N_name.sql`; it is applied on the next start.
-- **Plugin**: drop `plugins/name.py` with `setup(api)`; see `steepserver/plugins/api.py`.
+- **Plugin**: drop `plugins/name.py` with `setup(api)`; see `powder/server/plugins/api.py`.
 - **Several players**: map machines to profiles in `[players.bind]` (client IP -> profile id) and set
   `public_host` to the host's LAN/VPN address. Each player gets their own inventory and stats.
 

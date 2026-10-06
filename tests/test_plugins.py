@@ -1,9 +1,9 @@
 """Plugin loading, hooks and events."""
 import textwrap
 
-from steepserver.plugins.loader import PluginManager
-from steepserver.transport.nex import rmc_codec as rmc
-from steepserver.transport.nex.dispatch import RmcDispatcher
+from powder.server.plugins.loader import PluginManager
+from powder.server.transport.nex import rmc_codec as rmc
+from powder.server.transport.nex.dispatch import RmcDispatcher
 
 PLUGIN = textwrap.dedent('''
     def setup(api):

@@ -10,13 +10,13 @@ from urllib.parse import parse_qs, urlsplit
 
 import pytest
 
-from steepserver.config import Config, ServerConfig
-from steepserver.constants import CREDITS_ITEM
-from steepserver.fixtures.http import HttpFixtures
-from steepserver.fixtures.rmc import RmcFixtures
-from steepserver.gamedata.build import build
-from steepserver.services import Assets, Services
-from steepserver.services.importer import import_recordings
+from powder.server.config import Config, ServerConfig
+from powder.server.constants import CREDITS_ITEM
+from powder.server.fixtures.http import HttpFixtures
+from powder.server.fixtures.rmc import RmcFixtures
+from powder.server.gamedata.build import build
+from powder.server.services import Assets, Services
+from powder.server.services.importer import import_recordings
 
 RECORDINGS = Path(__file__).resolve().parent.parent / "recordings"
 pytestmark = pytest.mark.skipif(not (RECORDINGS / "fixtures.json").exists(), reason="no local recordings")
@@ -45,9 +45,9 @@ def test_pack_catalogue_reproduces_every_recorded_offers_query(real):
 
 def _session_timeline():
     """Stat snapshots and stat uploads from recordings/sessions/*.jsonl (decrypted NEX captures)."""
-    from steepserver.services.stats import decode_stat_group
-    from steepserver.transport.nex.handlers.stats import decode_events
-    from steepserver.transport.nex.rmc_codec import Reader
+    from powder.server.services.stats import decode_stat_group
+    from powder.server.transport.nex.handlers.stats import decode_events
+    from powder.server.transport.nex.rmc_codec import Reader
     timeline = []
     for f in sorted((RECORDINGS / "sessions").glob("*.jsonl")):
         for line in f.read_text(encoding="utf-8").splitlines():

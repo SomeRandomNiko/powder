@@ -5,10 +5,10 @@ import base64
 import json
 from pathlib import Path
 
-from steepserver.constants import APP_ID, CREDITS_ITEM, SPACE_ID
-from steepserver.db.repos import StatRow
-from steepserver.services.stats import encode_stat_group, encode_value
-from steepserver.transport.demux import pb
+from powder.server.constants import APP_ID, CREDITS_ITEM, SPACE_ID
+from powder.server.db.repos import StatRow
+from powder.server.services.stats import encode_stat_group, encode_value
+from powder.server.transport.demux import pb
 
 PLAYER = "00000000-0000-4000-8000-000000000001"
 PLAYER_NAME = "TestPlayer"

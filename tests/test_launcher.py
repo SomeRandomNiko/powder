@@ -6,10 +6,10 @@ from pathlib import Path
 
 import pytest
 
-from steepserver.hostnames import REDIRECT_HOSTS
-from steeplauncher import dns, hostsfix, locate
-from steeplauncher.config import LauncherConfig
-from steeplauncher.session import ACTION, Session, launch_url, play_buttons
+from powder.server.hostnames import REDIRECT_HOSTS
+from powder.launcher import dns, hostsfix, locate
+from powder.launcher.config import LauncherConfig
+from powder.launcher.session import ACTION, Session, launch_url, play_buttons
 
 
 def test_dns_mismatches(monkeypatch):
@@ -53,6 +53,16 @@ def test_hosts_replaces_legacy_block(tmp_path, monkeypatch):
     assert "emulator redirect" not in text and "127.0.0.2" not in text
     assert text.splitlines().count("127.0.0.1 public-ubiservices.ubi.com") == 1
     assert "127.0.0.1 dmx.upc.ubisoft.com" in text.splitlines()
+
+
+def test_hosts_block_from_before_the_rename_is_removed(tmp_path, monkeypatch):
+    monkeypatch.setattr(dns, "flush_dns", lambda: None)
+    hosts = tmp_path / "hosts"
+    hosts.write_text("# sample\n# steep-re launcher redirect (remove this block to restore normal online play)\n"
+                     "127.0.0.1 public-ubiservices.ubi.com\n")
+    assert len(dns.read_block(hosts.read_text())) == 2
+    hostsfix.apply("remove", "127.0.0.1", hosts, tmp_path / "bak")
+    assert hosts.read_text().strip() == "# sample"
 
 
 def test_hosts_block_lines():
@@ -148,7 +158,7 @@ def test_launch_url_per_version():
 
 
 def test_real_game_is_the_one_connect_started(monkeypatch):
-    from steeplauncher import attach
+    from powder.launcher import attach
     # (pid, parent pid, threads, exe) as in a real launch: Steam's starter, then Connect's real game
     procs = [(1, 0, 90, "steam.exe"), (2, 0, 30, "UbisoftGameLauncher.exe"),
              (10, 1, 6, "Steep.exe"), (11, 2, 6, "Steep.exe")]
@@ -174,7 +184,7 @@ def test_config(tmp_path):
     cfg = LauncherConfig.load(p)
     assert cfg.server_address == "192.168.1.10" and cfg.remove_hosts_on_exit
     assert cfg.server_config_path() == tmp_path / "config.toml"
-    assert cfg.status_url == "https://192.168.1.10:443/_steep/status"
+    assert cfg.status_url == "https://192.168.1.10:443/_powder/status"
     p.write_text('typo = 1\n')
     with pytest.raises(ValueError):
         LauncherConfig.load(p)
@@ -200,8 +210,8 @@ def test_session_ask_waits_for_choice(tmp_path):
 STORE = """Root "Trusted Root Certification Authorities"
 ================ Certificate 0 ================
 Serial Number: 01
-Issuer: O=steepserver (local), CN=steepserver local CA
-Subject: O=steepserver (local), CN=steepserver local CA
+Issuer: O=Powder (local), CN=Powder local CA
+Subject: O=Powder (local), CN=Powder local CA
 Cert Hash(sha1): aa bb cc dd
 ================ Certificate 1 ================
 Serial Number: 02
@@ -216,13 +226,14 @@ CertUtil: -store command completed successfully.
 
 
 def test_certutil_store_parsing(monkeypatch):
-    from steepserver import trust
+    from powder.server import trust
     assert trust.parse_store(STORE)[1] == ("11223344", "CN=Some Public Root, O=Example")
 
     class R:
         stdout, returncode = STORE, 0
     monkeypatch.setattr(trust, "_certutil", lambda *a: R)
-    assert [t for t, _ in trust.installed_cas()] == ["AABBCCDD", "EEFF0011"]    # only the server's CAs
+    # only the server's CAs: the current name and one generated before the rename to Powder
+    assert [t for t, _ in trust.installed_cas()] == ["AABBCCDD", "EEFF0011"]
 
 
 class FakePC:
@@ -230,12 +241,12 @@ class FakePC:
 
     def __init__(self, hosts=True, cas=2, connect=True, game=False):
         self.hosts = ["# marker", "127.0.0.1 public-ubiservices.ubi.com"] if hosts else []
-        self.cas = [(f"T{i}", "CN=steepserver local CA") for i in range(cas)]
+        self.cas = [(f"T{i}", "CN=Powder local CA") for i in range(cas)]
         self.connect, self.game, self.calls = connect, game, []
 
     def install(self, monkeypatch, uac_ok=True):
-        from steepserver import trust
-        from steeplauncher import attach, connect, elevate, footprint, server
+        from powder.server import trust
+        from powder.launcher import attach, connect, elevate, footprint, server
 
         def hosts(action, address, backup_dir):
             self.calls.append(("hosts", action))
@@ -275,8 +286,8 @@ class Scripted(Session):
 
 
 def test_restore_undoes_hosts_and_certificates(tmp_path, monkeypatch):
-    from steeplauncher import footprint
-    from steeplauncher.session import restore_steps
+    from powder.launcher import footprint
+    from powder.launcher.session import restore_steps
     pc = FakePC()
     pc.install(monkeypatch)
     assert not footprint.scan(LauncherConfig()).clean
@@ -292,7 +303,7 @@ def test_restore_undoes_hosts_and_certificates(tmp_path, monkeypatch):
 
 
 def test_restore_skip_means_no_windows_prompt(tmp_path, monkeypatch):
-    from steeplauncher.session import FAILED, restore_steps
+    from powder.launcher.session import FAILED, restore_steps
     pc = FakePC(connect=False)
     pc.install(monkeypatch)
     s = Scripted(LauncherConfig(), tmp_path, answers=["Skip", "Skip"])
@@ -302,7 +313,7 @@ def test_restore_skip_means_no_windows_prompt(tmp_path, monkeypatch):
 
 
 def test_restore_on_a_clean_pc_changes_nothing(tmp_path, monkeypatch):
-    from steeplauncher.session import restore_steps
+    from powder.launcher.session import restore_steps
     pc = FakePC(hosts=False, cas=0, connect=True)
     pc.install(monkeypatch)
     s = Scripted(LauncherConfig(), tmp_path, answers=["Leave it running"])
@@ -312,7 +323,7 @@ def test_restore_on_a_clean_pc_changes_nothing(tmp_path, monkeypatch):
 
 
 def test_restore_declined_uac_is_reported(tmp_path, monkeypatch):
-    from steeplauncher.session import FAILED, restore_steps
+    from powder.launcher.session import FAILED, restore_steps
     pc = FakePC(cas=0, connect=False)
     pc.install(monkeypatch, uac_ok=False)
     s = Scripted(LauncherConfig(), tmp_path, answers=["Remove entries", "Try again", "Skip"])
@@ -323,7 +334,7 @@ def test_restore_declined_uac_is_reported(tmp_path, monkeypatch):
 
 
 def test_console_restore_on_a_clean_pc(tmp_path, monkeypatch):
-    from steeplauncher.__main__ import main
+    from powder.launcher.__main__ import main
     FakePC(hosts=False, cas=0, connect=False).install(monkeypatch)
     (tmp_path / "launcher.toml").write_text("")
     monkeypatch.setattr("builtins.input", lambda *a: "2")           # "Done", not "Start Ubisoft Connect"
@@ -332,8 +343,8 @@ def test_console_restore_on_a_clean_pc(tmp_path, monkeypatch):
 
 def test_run_game_skips_a_starter_that_exits(tmp_path, monkeypatch):
     """If the attached process turns out to be a starter (exits within seconds), wait for the real game."""
-    from steeplauncher import attach, server
-    import steeplauncher.session as session_mod
+    from powder.launcher import attach, server
+    import powder.launcher.session as session_mod
     alive: set[int] = set()
     found = iter([101, 202])                         # the starter first, then the game
     attached = []

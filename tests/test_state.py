@@ -2,11 +2,11 @@
 import pytest
 
 import synthetic as syn
-from steepserver.constants import CREDITS_ITEM
-from steepserver.services import Services
-from steepserver.services.economy import EconomyError
-from steepserver.services.importer import ImportError_, import_recordings
-from steepserver.services.stats import LEVEL_KEY
+from powder.server.constants import CREDITS_ITEM
+from powder.server.services import Services
+from powder.server.services.economy import EconomyError
+from powder.server.services.importer import ImportError_, import_recordings
+from powder.server.services.stats import LEVEL_KEY
 
 
 def test_catalog_filters(assets):
@@ -30,7 +30,7 @@ def test_import_from_recordings(services, player):
 
 
 def test_stat_group_reply_is_byte_identical_to_recording(services, player, recordings_dir):
-    from steepserver.fixtures.rmc import RmcFixtures
+    from powder.server.fixtures.rmc import RmcFixtures
     recorded = RmcFixtures.load(recordings_dir / "fixtures-rmc.json").latest("PlayerStats2Protocol::GetStatisticGroup_V1")
     assert services.stats.group_reply(player, "player_profile") == recorded
 
@@ -99,7 +99,7 @@ def test_new_player_by_default_and_never_from_recordings(services):
 
 
 def test_without_a_pack_a_local_default_player_is_created_once(tmp_path):
-    from steepserver.config import Config, ServerConfig
+    from powder.server.config import Config, ServerConfig
     cfg = Config(server=ServerConfig(data_dir=tmp_path / "d", gamedata_dir=tmp_path / "none"))
     s = Services.open(cfg)
     first = s.default_player_id()
@@ -120,3 +120,18 @@ def test_reset_starts_over_as_a_new_player(services, player):
     services.reset(player)
     assert services.accounts.player(player).name.startswith("Player-")
     assert services.economy.credits(player) == 0
+
+
+def test_database_from_before_the_rename_is_moved(make_services, config, recordings_dir):
+    s = make_services()
+    import_recordings(s, recordings_dir)
+    s.db.close()
+    data = config.server.data_dir
+    for suffix in ("", "-wal", "-shm"):                  # as a pre-rename install left it
+        src = data / f"powder.db{suffix}"
+        if src.exists():
+            src.rename(data / f"steep.db{suffix}")
+    s2 = Services.open(config, s.assets)
+    assert (data / "powder.db").exists() and not (data / "steep.db").exists()
+    assert s2.repos.players.get(syn.PLAYER) is not None
+    s2.db.close()

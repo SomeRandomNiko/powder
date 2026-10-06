@@ -9,15 +9,15 @@ import pytest
 from aiohttp import web
 
 import synthetic
-from steepserver import tls
-from steepserver.services import Services
-from steepserver.services.importer import import_recordings
-from steepserver.transport import tls_router
-from steepserver.transport.demux import pb
-from steepserver.transport.demux import server as demux_server
-from steepserver.transport.https.app import build_app
-from steepserver.transport.https.keys import CA_PEM
-from steepserver.transport.demux.services import FLAT, NESTED, parse_request, with_request_id
+from powder.server import tls
+from powder.server.services import Services
+from powder.server.services.importer import import_recordings
+from powder.server.transport import tls_router
+from powder.server.transport.demux import pb
+from powder.server.transport.demux import server as demux_server
+from powder.server.transport.https.app import build_app
+from powder.server.transport.https.keys import CA_PEM
+from powder.server.transport.demux.services import FLAT, NESTED, parse_request, with_request_id
 
 TOKEN = b"made-up-token"
 
@@ -50,7 +50,7 @@ def _product(pid: int, cloud: str) -> bytes:
 
 
 def test_owned_games_without_cloud_saves():
-    from steepserver.transport.demux.ownership import without_cloud_saves
+    from powder.server.transport.demux.ownership import without_cloud_saves
     out, changed = without_cloud_saves([_product(3280, "yes"), _product(9999, "no"), pb.encode([(1, 4242)])])
     assert changed == 1
     assert out == [_product(3280, "no"), _product(9999, "no"), pb.encode([(1, 4242)])]   # lengths re-encoded
@@ -85,9 +85,9 @@ async def _https_get(pki, port: int, host: str, path: str) -> tuple[int, bytes]:
 
 async def test_https_and_demux_share_one_port(demux):
     services, pki, port = demux
-    status, body = await _https_get(pki, port, "public-ubiservices.ubi.com", "/_steep/status")
+    status, body = await _https_get(pki, port, "public-ubiservices.ubi.com", "/_powder/status")
     assert status == 200 and json.loads(body)["connect"] == []
-    status, body = await _https_get(pki, port, "public-ubiservices.ubi.com", "/_steep/ca.pem")
+    status, body = await _https_get(pki, port, "public-ubiservices.ubi.com", "/_powder/ca.pem")
     assert status == 200 and body == pki.ca_pem.read_bytes()
 
     ctx = ssl.create_default_context(cafile=str(pki.ca_pem))
@@ -95,7 +95,7 @@ async def test_https_and_demux_share_one_port(demux):
     c = Client(reader, writer)
     try:
         await c.request(2, 2, [(1, [(3, "any-ticket")]), (2, "uplay_pc")])     # demux login on the same port
-        status, body = await _https_get(pki, port, "public-ubiservices.ubi.com", "/_steep/status")
+        status, body = await _https_get(pki, port, "public-ubiservices.ubi.com", "/_powder/status")
         connect = json.loads(body)["connect"]
         assert [x["player"] for x in connect] == [synthetic.PLAYER_NAME]
         assert connect[0]["peer"].startswith("127.0.0.1:")                    # peer address kept

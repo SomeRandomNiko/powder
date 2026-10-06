@@ -4,9 +4,9 @@ import base64
 import pytest
 from cryptography.hazmat.primitives.asymmetric import ec
 
-from steepserver.transport.nex import rmc_codec as rmc
-from steepserver.transport.nex import secure
-from steepserver.transport.nex.prudp import (CLIENT_STREAM, CONNECT, DATA, FLAG_ACK, FLAG_HAS_SIZE,
+from powder.server.transport.nex import rmc_codec as rmc
+from powder.server.transport.nex import secure
+from powder.server.transport.nex.prudp import (CLIENT_STREAM, CONNECT, DATA, FLAG_ACK, FLAG_HAS_SIZE,
                                              FLAG_KEY_EXCHANGE, FLAG_NEED_ACK, FLAG_RELIABLE, SERVER_STREAM,
                                              SYN, Packet, checksum)
 

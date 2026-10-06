@@ -4,10 +4,10 @@ from pathlib import Path
 import pytest
 
 import synthetic
-from steepserver.config import Config, ServerConfig
-from steepserver.gamedata.build import build
-from steepserver.services import Assets, Services
-from steepserver.services.importer import import_recordings
+from powder.server.config import Config, ServerConfig
+from powder.server.gamedata.build import build
+from powder.server.services import Assets, Services
+from powder.server.services.importer import import_recordings
 
 
 @pytest.fixture(scope="session")

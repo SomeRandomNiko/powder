@@ -1,8 +1,8 @@
 """Example plugin (skipped because the file name starts with "_"; copy it to e.g. my_plugin.py).
 
-See steepserver/plugins/api.py for the full API.
+See powder/server/plugins/api.py for the full API.
 """
-from steepserver.constants import CREDITS_ITEM
+from powder.server.constants import CREDITS_ITEM
 
 
 def setup(api):

@@ -6,14 +6,14 @@ import uuid
 import pytest
 from cryptography.hazmat.primitives.asymmetric import ec
 
-from steepserver.core.identity import LoginRequest
-from steepserver.services.stats import decode_stat_group
-from steepserver.transport.nex import rmc_codec as rmc
-from steepserver.transport.nex import secure
-from steepserver.transport.nex import server as nex_server
-from steepserver.transport.nex.connection import PrudpConnection, seq_before
-from steepserver.transport.nex.dispatch import RmcDispatcher
-from steepserver.transport.nex.prudp import (CONNECT, DATA, FLAG_ACK, FLAG_KEY_EXCHANGE, FLAG_NEED_ACK,
+from powder.server.core.identity import LoginRequest
+from powder.server.services.stats import decode_stat_group
+from powder.server.transport.nex import rmc_codec as rmc
+from powder.server.transport.nex import secure
+from powder.server.transport.nex import server as nex_server
+from powder.server.transport.nex.connection import PrudpConnection, seq_before
+from powder.server.transport.nex.dispatch import RmcDispatcher
+from powder.server.transport.nex.prudp import (CONNECT, DATA, FLAG_ACK, FLAG_KEY_EXCHANGE, FLAG_NEED_ACK,
                                              FLAG_RELIABLE, SYN, Packet)
 
 
@@ -156,7 +156,7 @@ async def test_unknown_ticket_is_attributed_in_lenient_mode(services, player, ne
 
 async def test_uploaded_progress_shows_in_the_next_stat_read(services, player, nex):
     from test_progression import encode_events
-    from steepserver.transport.nex.rmc_codec import V_UINT64
+    from powder.server.transport.nex.rmc_codec import V_UINT64
     _, client = nex
     session = services.accounts.login(LoginRequest("127.0.0.1"))
     client.call("LoginProtocol", 5, "LoginProtocol::LoginWithToken_V1",
