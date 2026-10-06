@@ -1,7 +1,7 @@
 # Powder
 
 **Keep Steep playable after Ubisoft's servers are gone.** Powder is a self-hosted stand-in for the online
-services Steep needs, plus a one-click launcher for Windows. It preserves *your own* copy of the game:
+services Steep needs, plus a one-click launcher for Windows. It preserves _your own_ copy of the game:
 progression, store, challenges and rewards all keep working without Ubisoft.
 
 Powder is an unofficial fan preservation project. It is not affiliated with or endorsed by Ubisoft;
@@ -16,9 +16,66 @@ Ubisoft Connect. The repository contains no game files and no data from Ubisoft'
 - **Launcher** (`powder`): runs on the PC with the game. It checks and sets up what is needed there (server,
   DNS, certificate, Ubisoft Connect), starts Steep online against the server, and can undo all of it again.
 
-What persists per player: inventory and credits (store purchases, challenge rewards), progression
-(level and XP per sport, playtime, completed memorables, unlocked dropzones and challenges), personal
-best per challenge, and profile entities (rider card, favorites).
+## Game features
+
+What Steep needs a server for, and how far Powder covers it.
+
+| Status         | Meaning                                                                                                                 |
+| -------------- | ----------------------------------------------------------------------------------------------------------------------- |
+| ✅ Working     | Works like with Ubisoft's servers                                                                                       |
+| 🟡 Partly      | The game accepts the answer, but the feature is limited, not verified everywhere, or not usable without technical steps |
+| ❌ Not working | The game asks, the server answers with an empty or placeholder reply: the feature is missing                            |
+| ⛔ Not planned | Not part of Steep's gameplay, or not worth emulating                                                                    |
+
+### Getting online
+
+| Feature                                         | Status | Notes                                                                                       |
+| ----------------------------------------------- | ------ | ------------------------------------------------------------------------------------------- |
+| Ubisoft Connect sign-in                         | ✅     | Any email/password; Connect stays signed in to the server                                   |
+| Game login (Steam and Ubisoft Connect versions) | ✅     | Both versions of the final update (TU7)                                                     |
+| Owned games / DLC ownership                     | ✅     | Steep and its add-ons from the game-data pack                                               |
+| Game configuration, season info                 | ✅     | Static, from the game-data pack                                                             |
+| Several players on one server                   | 🟡     | Possible by mapping IP addresses to players (`[players.bind]`); no real player accounts yet |
+
+### Progression and economy
+
+| Feature                                          | Status | Notes                                                                                                                                  |
+| ------------------------------------------------ | ------ | -------------------------------------------------------------------------------------------------------------------------------------- |
+| Level and XP per sport, playtime                 | ✅     | From the game's stat uploads; never goes down                                                                                          |
+| Medals, dropzones, memorables, unlocks           | ✅     |                                                                                                                                        |
+| Store: buying items with credits                 | ✅     | Full catalogue from the game-data pack                                                                                                 |
+| Challenge rewards (credits, items)               | ✅     |                                                                                                                                        |
+| Rider card and favorites                         | ✅     |                                                                                                                                        |
+| Personal best per challenge                      | ✅     | Stored on the server                                                                                                                   |
+| Achievements                                     | 🟡     | Stored and shown in Ubisoft Connect; a newly earned achievement not yet verified in-game                                               |
+| Taking over your progress from Ubisoft's servers | 🟡     | Only from recordings of your own online sessions, via the command line (`admin import`); players can't make such recordings themselves |
+
+### Competing and sharing
+
+| Feature                           | Status | Notes                                                                       |
+| --------------------------------- | ------ | --------------------------------------------------------------------------- |
+| Leaderboards (challenge rankings) | ❌     | Always empty; the scores are already stored, the rankings are not built yet |
+| Replays / ghosts of other players | ❌     | Uploads and downloads of replays are not stored or served                   |
+| Player-made trails / challenges   | ❌     | Always an empty list                                                        |
+| Seasons and tournaments           | 🟡     | The recorded season is shown; nothing time-limited or changing              |
+
+### Playing with others
+
+| Feature                                                  | Status | Notes                                                                     |
+| -------------------------------------------------------- | ------ | ------------------------------------------------------------------------- |
+| Multiplayer sessions (other riders in the world, groups) | ❌     | The game opens its own session; players are never matched with each other |
+| Matchmaking                                              | 🟡     | Answered, so the game does not stall; it never finds a match              |
+| Friends list, invites, blocks                            | ❌     | Always empty                                                              |
+| Other players' profiles (rider card, level)              | ❌     | Only your own                                                             |
+
+### Ubisoft services around the game
+
+| Feature                                                           | Status | Notes                                                                                   |
+| ----------------------------------------------------------------- | ------ | --------------------------------------------------------------------------------------- |
+| Ubisoft Club (actions, units, rewards)                            | ⛔     | Ubisoft's cross-game reward system: the action list is shown, no progress or rewards    |
+| Cloud saves                                                       | ❌     | Switched off, so Connect never asks to sync; game settings stay on each PC              |
+| News, recommendations, Ubisoft Connect store and free-games pages | ⛔     | Ubisoft's own content, not part of Steep                                                |
+| Telemetry, crash reports                                          | ⛔     | Acknowledged and dropped (the game's error reports are kept in the server's log folder) |
 
 ## Install
 
@@ -156,11 +213,11 @@ Installed, Powder's folder is `%LOCALAPPDATA%\Powder`; from source, the current 
 
 ## Ports
 
-| Port | Protocol | What |
-|---|---|---|
-| 443 | TCP | HTTPS for the game and Ubisoft Connect, and Connect's demux (one listener, routed by hostname) |
-| 6005 | UDP | Quazal NEX (the game's online session) |
-| 80 | TCP | the local CA's revocation list (`http://public-ubiservices.ubi.com/powder-ca.crl`) |
+| Port | Protocol | What                                                                                           |
+| ---- | -------- | ---------------------------------------------------------------------------------------------- |
+| 443  | TCP      | HTTPS for the game and Ubisoft Connect, and Connect's demux (one listener, routed by hostname) |
+| 6005 | UDP      | Quazal NEX (the game's online session)                                                         |
+| 80   | TCP      | the local CA's revocation list (`http://public-ubiservices.ubi.com/powder-ca.crl`)             |
 
 All three are set in `config.toml`. By default the server only listens on this PC (`bind = "127.0.0.1"`),
 so Windows never asks about the firewall. For friends on a LAN/VPN, set `bind = "0.0.0.0"` and
@@ -199,8 +256,7 @@ uv run powder-server admin trust status
 uv run powder-server admin trust remove
 ```
 
-Not emulated yet: storing cloud saves, leaderboards (empty), and the news / free games pages of
-Connect's UI.
+What is not emulated (cloud saves, friends, Connect's news and store pages): see [Game features](#game-features).
 
 The server's own endpoints: `GET /_powder/status` (connected Connect clients and game sessions) and
 `GET /_powder/ca.pem` (the CA certificate). No authentication yet: meant for a LAN/VPN of friends.
@@ -226,55 +282,12 @@ uv run powder-server admin trust status           # the local CA in Windows (als
 
 ## How a request is answered
 
-| | HTTPS | NEX |
-|---|---|---|
-| 1 | plugin `before_http` hook | plugin `before_rmc` hook |
-| 2 | route with real logic (`transport/https/routes_*.py`) | handler (`transport/nex/handlers/*`) |
-| 3 | game-data pack reply (configuration) | game-data pack reply (`rmc.json`) |
-| 4 | `{}` + `UNMATCHED` in the log | RMC error `Core/2` + `UNHANDLED` in the log |
-
-## Layout
-
-```
-powder/server/
-  app.py              starts HTTPS + NEX on one event loop
-  config.py           config.toml -> Config; gameplay toggles per player
-  constants.py        game-wide ids: app, space, credits item
-  tls.py              local CA (name-constrained) + server certificate + CRL (generated on first run)
-  gamedata/           game-data pack: builder, privacy check, manifest
-  fixtures/           lookups over the pack; catalog.py = store offers
-  core/               identity (who logs in), sessions (tickets, live connections, server push), events
-  db/                 SQLite, numbered migrations, repositories
-  services/           game logic: accounts, economy, stats (progression), entities, matchmaking, import
-  hostnames.py        the Ubisoft hostnames that must resolve to the server
-  trust.py            local CA in Windows' trusted roots (admin CLI + launcher)
-  transport/tls_router.py  one TLS port: demux or HTTPS by requested hostname
-  transport/https/    aiohttp app, UbiServices + generated profile routes, /_powder/, WebSocket, CRL site
-  transport/demux/    Ubisoft Connect's demux protocol (protobuf, per-service replies)
-  transport/nex/      PRUDP, secure channel, RMC codec, dispatcher, per-protocol handlers
-  plugins/            plugin API + loader
-  admin/              CLI
-powder/launcher/
-  session.py          the Play and Restore system flows (steps, questions, worker thread)
-  ui.py               the window (Tkinter)
-  locate.py           finds Steam, Ubisoft Connect and every installed Steep
-  game.py             supported Steep.exe builds
-  attach.py           finds the real game process, loads the TLS helper
-  dns.py, hostsfix.py, elevate.py   hosts check, hosts-file edit (the only admin step)
-  certs.py            the server's CA for Windows (via powder/server/trust.py)
-  connect.py          Ubisoft Connect: running, restart, signed in
-  server.py           start / reach the server, its status
-  ports.py            are the server's ports free, and who holds them
-  footprint.py        what the launcher has set up (for --status and Restore system)
-powder/__main__.py    one program: launcher, `server ...`, `hostsfix ...` (what the installed exe runs)
-powder/paths.py       where files are, from source or installed
-powder/version.py     the version (set from the release tag)
-native/               TLS helper (C, built with zig)
-packaging/            PyInstaller spec, Inno Setup script, build.ps1, next_version.py
-.github/workflows/    release.yml
-plugins/              your plugins (_example.py shows the API)
-tests/                pytest; synthetic.py = made-up recordings and pack used by the tests
-```
+|     | HTTPS                                                 | NEX                                         |
+| --- | ----------------------------------------------------- | ------------------------------------------- |
+| 1   | plugin `before_http` hook                             | plugin `before_rmc` hook                    |
+| 2   | route with real logic (`transport/https/routes_*.py`) | handler (`transport/nex/handlers/*`)        |
+| 3   | game-data pack reply (configuration)                  | game-data pack reply (`rmc.json`)           |
+| 4   | `{}` + `UNMATCHED` in the log                         | RMC error `Core/2` + `UNHANDLED` in the log |
 
 ## Extending
 
@@ -286,24 +299,6 @@ tests/                pytest; synthetic.py = made-up recordings and pack used by
 - **Plugin**: drop `plugins/name.py` with `setup(api)`; see `powder/server/plugins/api.py`.
 - **Several players**: map machines to profiles in `[players.bind]` (client IP -> profile id) and set
   `public_host` to the host's LAN/VPN address. Each player gets their own inventory and stats.
-
-## Releases
-
-Versions follow [semantic versioning](https://semver.org): a new **major** version means launcher and
-server of different majors don't work together, or data needs a manual step; **minor** adds features;
-**patch** fixes bugs.
-
-To release: Actions → **Release** → *Run workflow*, with the ref (default `main`) and the bump. It tags
-the next version on that ref (the first one is `v0.1.0`), builds the installer on Windows with
-`packaging\build.ps1` (helpers, tests, PyInstaller, Inno Setup) and creates a **draft** release with
-`Powder-Setup-vX.Y.Z.exe`; review and publish it. If the build fails or the run is cancelled, the tag and
-the draft are removed again. The same build locally: `packaging\build.ps1 -Version 0.1.0` (needs uv, zig
-and Inno Setup 6), output in `dist\`.
-
-## Roadmap
-
-A dockerized, self-hostable server with a web admin panel, so friends can share one server while each
-runs the launcher on their own PC; real local leaderboards; cloud saves; code signing.
 
 ## Licence
 
