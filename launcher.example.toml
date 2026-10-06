@@ -5,9 +5,11 @@ server_address = "127.0.0.1"     # the address every Ubisoft hostname must resol
 server_https_port = 443
 # server_config = "config.toml"  # steepserver config for local mode (default: config.toml next to this file)
 
-# Paths are found automatically (registry, Steam libraries); set them only if that fails.
+# Paths are found automatically: Steep from Steam (any library) and from Ubisoft Connect (any folder), as
+# recorded by Steam and Ubisoft Connect. Set them only if that fails. steep_exe replaces the search with
+# that one copy (Steam or Ubisoft Connect version, told apart automatically).
 # steam_exe = 'C:\Program Files (x86)\Steam\steam.exe'
-# steep_exe = 'D:\SteamLibrary\steamapps\common\Steep\Steep.exe'
+# steep_exe = 'D:\Games\Steep\Steep.exe'
 # connect_exe = 'C:\Program Files (x86)\Ubisoft\Ubisoft Game Launcher\UbisoftConnect.exe'
 
 remove_hosts_on_exit = false     # take the hosts entries the launcher added out again when it closes

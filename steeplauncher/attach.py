@@ -77,6 +77,27 @@ def game_processes(name: str = "Steep.exe") -> list[GameProcess]:
             for pid, ppid, threads, exe in procs if exe.lower() == name.lower()]
 
 
+def image_path(pid: int) -> str:
+    """Full path of the process's exe (query-only access), or '' if denied."""
+    k = _k32()
+    h = k.OpenProcess(0x1000, False, pid)                     # PROCESS_QUERY_LIMITED_INFORMATION
+    if not h:
+        return ""
+    try:
+        buf = ctypes.create_unicode_buffer(1024)
+        size = wintypes.DWORD(len(buf))
+        return buf.value if k.QueryFullProcessImageNameW(wintypes.HANDLE(h), 0, buf, ctypes.byref(size)) else ""
+    finally:
+        k.CloseHandle(h)
+
+
+def _in_dir(pid: int, exe_dir: Path | None) -> bool:
+    if exe_dir is None:
+        return True
+    path = image_path(pid).replace("/", "\\").lower()
+    return path.startswith(str(exe_dir).replace("/", "\\").lower().rstrip("\\") + "\\")
+
+
 def command_line(pid: int) -> str:
     """The process's command line (NtQueryInformationProcess class 60, Windows 8.1+), or '' if denied."""
     k = _k32()
@@ -128,10 +149,11 @@ class ProcessObserver:
 CONNECT_PARENTS = {"ubisoftgamelauncher.exe", "ubisoftgamelauncher64.exe", "upc.exe", "ubisoftconnect.exe"}
 
 
-def real_game_pid(min_threads: int = 20) -> int | None:
+def real_game_pid(min_threads: int = 20, exe_dir: Path | None = None) -> int | None:
     """The real game, not Steam's starter: the Steep.exe started by Ubisoft Connect. Fallback if no
-    parent matches (e.g. Connect renamed its processes): the Steep.exe with the most threads."""
-    procs = game_processes()
+    parent matches (e.g. Connect renamed its processes): the Steep.exe with the most threads.
+    With `exe_dir`, only a Steep.exe from that install counts (both versions may be installed)."""
+    procs = [p for p in game_processes() if _in_dir(p.pid, exe_dir)]
     by_connect = [p for p in procs if p.parent_name.lower() in CONNECT_PARENTS]
     if by_connect:
         return by_connect[-1].pid
@@ -187,7 +209,7 @@ def ready() -> str | None:
 
 
 def wait_for_real_game(timeout: float, stop=lambda: False, settle: float = 1.0,
-                       observer: "ProcessObserver | None" = None) -> int | None:
+                       observer: "ProcessObserver | None" = None, exe_dir: Path | None = None) -> int | None:
     """The real game pid once it has been up for `settle` seconds (a moment to finish starting up).
     Attaching early matters: the player can press a key at the title screen right away."""
     deadline = time.monotonic() + timeout
@@ -195,7 +217,7 @@ def wait_for_real_game(timeout: float, stop=lambda: False, settle: float = 1.0,
     while time.monotonic() < deadline and not stop():
         if observer:
             observer.poll()
-        pid = real_game_pid()
+        pid = real_game_pid(exe_dir=exe_dir)
         if pid:
             first_seen.setdefault(pid, time.monotonic())
             if time.monotonic() - first_seen[pid] >= settle:

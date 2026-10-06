@@ -2,13 +2,14 @@
 config, and the session's ask/choose plumbing."""
 import threading
 import time
+from pathlib import Path
 
 import pytest
 
 from steepserver.hostnames import REDIRECT_HOSTS
 from steeplauncher import dns, hostsfix, locate
 from steeplauncher.config import LauncherConfig
-from steeplauncher.session import ACTION, Session
+from steeplauncher.session import ACTION, Session, launch_url, play_buttons
 
 
 def test_dns_mismatches(monkeypatch):
@@ -60,18 +61,90 @@ def test_hosts_block_lines():
     assert dns.lines_for_display("127.0.0.1").splitlines() == [f"127.0.0.1 {h}" for h in REDIRECT_HOSTS]
 
 
-def test_steam_library_lookup(tmp_path, monkeypatch):
+class FakeRegistry:
+    """{(root, key): {value: data}}; subkeys are derived from the keys."""
+
+    def __init__(self, monkeypatch, entries: dict):
+        self.entries = entries
+        monkeypatch.setattr(locate, "_reg", lambda root, key, value: entries.get((root, key), {}).get(value))
+        monkeypatch.setattr(locate, "_subkeys", self.subkeys)
+
+    def subkeys(self, root, key):
+        prefix = key + "\\"
+        return sorted({k[len(prefix):].split("\\")[0] for r, k in self.entries if r == root and k.startswith(prefix)})
+
+
+def _exe(folder: Path) -> Path:
+    folder.mkdir(parents=True, exist_ok=True)
+    (folder / "Steep.exe").write_bytes(b"MZ")
+    return folder / "Steep.exe"
+
+
+def _steam(tmp_path, library: Path, installdir: str) -> dict:
+    """A Steam install whose second library (another 'drive') has Steep under `installdir`."""
     steam = tmp_path / "Steam"
-    other = tmp_path / "Games"
     (steam / "steamapps").mkdir(parents=True)
-    exe = other / "steamapps" / "common" / "Steep" / "Steep.exe"
-    exe.parent.mkdir(parents=True)
-    exe.write_bytes(b"MZ")
     (steam / "steamapps" / "libraryfolders.vdf").write_text(
         '"libraryfolders"\n{\n "0" { "path" "%s" }\n "1" { "path" "%s" }\n}\n'
-        % (str(steam).replace("\\", "\\\\"), str(other).replace("\\", "\\\\")))
-    monkeypatch.setattr(locate, "steam_path", lambda: steam)
-    assert locate.steep_exe() == exe
+        % (str(steam).replace("\\", "\\\\"), str(library).replace("\\", "\\\\")))
+    (library / "steamapps").mkdir(parents=True, exist_ok=True)
+    (library / "steamapps" / "appmanifest_460920.acf").write_text(
+        '"AppState"\n{\n "appid" "460920"\n "installdir" "%s"\n}\n' % installdir)
+    return {("HKCU", r"Software\Valve\Steam"): {"SteamPath": str(steam)}}
+
+
+def _connect(folder: Path, product: str = "3279") -> dict:
+    return {("HKLM", rf"{locate.UBI_INSTALLS}\{product}"): {"InstallDir": str(folder).replace("\\", "/") + "/"},
+            ("HKLM", rf"{locate.UBI_INSTALLS}\5487"): {"InstallDir": "C:/elsewhere/OtherGame/"}}
+
+
+def test_finds_steam_version_in_any_library(tmp_path, monkeypatch):
+    lib = tmp_path / "D" / "Games"
+    exe = _exe(lib / "steamapps" / "common" / "Steep Winter")         # not the default folder name
+    FakeRegistry(monkeypatch, _steam(tmp_path, lib, "Steep Winter"))
+    assert locate.find_installs() == [locate.Install(locate.STEAM, exe)]
+
+
+def test_finds_connect_version_in_any_folder(tmp_path, monkeypatch):
+    exe = _exe(tmp_path / "my games" / "ubi" / "Steep")
+    FakeRegistry(monkeypatch, _connect(exe.parent))
+    (inst,) = locate.find_installs()
+    assert inst.kind == locate.CONNECT and inst.product_id == 3279 and locate.same_exe(inst.exe, exe)
+
+
+def test_connect_version_from_uninstall_entry_only(tmp_path, monkeypatch):
+    exe = _exe(tmp_path / "Steep")
+    FakeRegistry(monkeypatch, {("HKLM", rf"{locate.UNINSTALL[0]}\Uplay Install 3279"): {"InstallLocation": str(exe.parent)},
+                               ("HKLM", rf"{locate.UNINSTALL[0]}\Something Else"): {"InstallLocation": "C:/x"}})
+    assert [(i.kind, i.product_id) for i in locate.find_installs()] == [(locate.CONNECT, 3279)]
+
+
+def test_both_versions_and_no_duplicates(tmp_path, monkeypatch):
+    lib = tmp_path / "SteamLib"
+    steam_exe = _exe(lib / "steamapps" / "common" / "Steep")
+    connect_exe = _exe(tmp_path / "Ubisoft" / "Steep")
+    reg = {**_steam(tmp_path, lib, "Steep"), **_connect(connect_exe.parent),
+           ("HKLM", rf"{locate.UNINSTALL[0]}\Uplay Install 3279"): {"InstallLocation": str(connect_exe.parent)},
+           # Connect also records the Steam copy: it stays the Steam version, listed once
+           ("HKLM", rf"{locate.UBI_INSTALLS}\3280"): {"InstallDir": str(steam_exe.parent)}}
+    FakeRegistry(monkeypatch, reg)
+    installs = locate.find_installs()
+    assert [i.kind for i in installs] == [locate.STEAM, locate.CONNECT]
+    assert [label for label, _ in play_buttons(installs)] == ["Play (Steam)", "Play (Ubisoft Connect)"]
+
+
+def test_nothing_installed_and_override(tmp_path, monkeypatch):
+    FakeRegistry(monkeypatch, {})
+    assert locate.find_installs() == []
+    assert play_buttons([]) == [("Play", None)]
+    exe = _exe(tmp_path / "Portable" / "Steep")
+    (inst,) = locate.find_installs(override=str(exe))
+    assert inst.kind == locate.STEAM and play_buttons([inst]) == [("Play", inst)]
+
+
+def test_launch_url_per_version():
+    assert launch_url(locate.Install(locate.STEAM, Path("s")), 460920) == "steam://rungameid/460920"
+    assert launch_url(locate.Install(locate.CONNECT, Path("c"), 3279), 460920) == "uplay://launch/3279/0"
 
 
 def test_real_game_is_the_one_connect_started(monkeypatch):
@@ -85,6 +158,12 @@ def test_real_game_is_the_one_connect_started(monkeypatch):
     assert attach.real_game_pid() is None               # only the starter: not the game
     procs[:] = [(5, 0, 9, "renamedlauncher.exe"), (12, 5, 37, "Steep.exe")]
     assert attach.real_game_pid() == 12                 # fallback: thread count
+    # both versions running: only the one from the chosen install counts
+    procs[:] = [(2, 0, 30, "UbisoftGameLauncher.exe"), (20, 2, 40, "Steep.exe"), (21, 2, 40, "Steep.exe")]
+    paths = {20: r"C:\Program Files (x86)\Steam\steamapps\common\Steep\Steep.exe", 21: r"D:\Ubi\Steep\Steep.exe"}
+    monkeypatch.setattr(attach, "image_path", lambda pid: paths.get(pid, ""))
+    assert attach.real_game_pid(exe_dir=Path("D:/Ubi/Steep")) == 21
+    assert attach.real_game_pid(exe_dir=Path(r"C:\Program Files (x86)\Steam\steamapps\common\Steep")) == 20
 
 
 def test_config(tmp_path):

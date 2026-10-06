@@ -52,6 +52,20 @@ def play_steps() -> list[Step]:
             Step("cert", "Certificate"), Step("connect", "Ubisoft Connect"), Step("game", "Steep")]
 
 
+def play_buttons(installs: list[locate.Install]) -> list[tuple[str, locate.Install | None]]:
+    """(label, install) per Play button: one plain "Play" unless several versions are installed."""
+    if len(installs) <= 1:
+        return [("Play", installs[0] if installs else None)]
+    return [(f"Play ({i.label})", i) for i in installs]
+
+
+def launch_url(install: locate.Install, steam_app_id: int) -> str:
+    """How the game is started: through Steam, or directly through Ubisoft Connect."""
+    if install.kind == locate.STEAM:
+        return f"steam://rungameid/{steam_app_id}"
+    return f"uplay://launch/{install.product_id}/0"
+
+
 def restore_steps() -> list[Step]:
     return [Step("game", "Steep"), Step("server", "Server"), Step("connect", "Ubisoft Connect"),
             Step("hosts", "Hosts file"), Step("cert", "Certificate"), Step("check", "Result")]
@@ -68,6 +82,13 @@ class Session:
         self.hosts_added = False
         self.thread: threading.Thread | None = None
         self.paths: dict[str, Path] = {}
+        self.installs: list[locate.Install] = self.detect()   # which Steep versions are installed
+        self.chosen: locate.Install | None = None              # the one the user pressed Play for
+        self.install: locate.Install | None = None             # the one being played (after check_files)
+
+    def detect(self) -> list[locate.Install]:
+        self.installs = locate.find_installs(self.cfg.steam_app_id, self.cfg.steep_exe)
+        return self.installs
 
     # ---- plumbing ---------------------------------------------------------------------------------
     def step(self, key: str) -> Step:
@@ -105,8 +126,11 @@ class Session:
             raise Cancelled
 
     # ---- run --------------------------------------------------------------------------------------
-    def start(self) -> None:
-        """Play: set up what is missing and start the game."""
+    def start(self, install: locate.Install | None = None) -> None:
+        """Play: set up what is missing and start the game (`install`: which version; None = the only one)."""
+        if self.thread and self.thread.is_alive():
+            return
+        self.chosen = install
         self._launch(play_steps(), (self.check_files, self.check_server, self.check_dns, self.check_cert,
                                     self.check_connect, self.run_game))
 
@@ -140,25 +164,42 @@ class Session:
             self.set(running.key, FAILED, f"error: {e}")
 
     # ---- steps ------------------------------------------------------------------------------------
+    def pick_install(self) -> locate.Install | None:
+        """The install to play: the one chosen (if still installed), else the first one found."""
+        self.set("files", RUNNING, "looking for Steep (Steam and Ubisoft Connect)")
+        while True:
+            installs = self.detect()
+            if self.chosen:
+                same = [i for i in installs if locate.same_exe(i.exe, self.chosen.exe)]
+                if same:
+                    return same[0]
+            elif installs:
+                return installs[0]
+            what = f"Steep ({self.chosen.label}) is no longer at {self.chosen.exe.parent}." if self.chosen else \
+                "Steep was not found: neither Steam nor Ubisoft Connect lists it as installed."
+            self.ask("files", what + " If it is installed in a place they don't record, set steep_exe in "
+                     "launcher.toml to its Steep.exe.", ["Check again"])
+
     def check_files(self) -> bool:
-        self.set("files", RUNNING, "looking for Steam, Steep and Ubisoft Connect")
+        install = self.pick_install()
         steam = Path(self.cfg.steam_exe) if self.cfg.steam_exe else locate.steam_exe()
-        steep = Path(self.cfg.steep_exe) if self.cfg.steep_exe else locate.steep_exe(self.cfg.steam_app_id)
         upc = Path(self.cfg.connect_exe) if self.cfg.connect_exe else locate.connect_exe()
-        missing = [n for n, p in (("Steam", steam), ("Steep.exe", steep), ("Ubisoft Connect", upc)) if not p]
+        needed = [("Ubisoft Connect", upc)] + ([("Steam", steam)] if install.kind == locate.STEAM else [])
+        missing = [n for n, p in needed if not p]
         if missing:
             self.set("files", FAILED, f"not found: {', '.join(missing)} (set the path in launcher.toml)")
             return False
-        build = game.supported_build(steep)
+        build = game.supported_build(install.exe)
         if not build:
-            self.set("files", FAILED, f"{steep} is a Steep.exe build the TLS helper does not support")
+            self.set("files", FAILED, f"{install.exe} is a Steep.exe build the launcher does not support yet")
             return False
         problem = attach.ready()
         if problem:
             self.set("files", FAILED, problem)
             return False
-        self.paths = {"steam": steam, "steep": steep, "connect": upc}
-        self.set("files", OK, f"{build}; Ubisoft Connect at {upc.parent}")
+        self.install = install
+        self.paths = {"steam": steam, "steep": install.exe, "connect": upc}
+        self.set("files", OK, f"{build} in {install.exe.parent}")
         return True
 
     def check_server(self) -> bool:
@@ -244,14 +285,15 @@ class Session:
         return False
 
     def run_game(self) -> bool:
-        self.set("game", RUNNING, "starting Steep through Steam")
+        inst = self.install
+        self.set("game", RUNNING, f"starting Steep through {inst.label}")
         try:
             attach.LOG.unlink(missing_ok=True)
         except OSError:
             pass
-        os.startfile(f"steam://rungameid/{self.cfg.steam_app_id}")
+        os.startfile(launch_url(inst, self.cfg.steam_app_id))
         observer = attach.ProcessObserver(log)
-        pid = attach.wait_for_real_game(180, stop=self.cancel.is_set, observer=observer)
+        pid = attach.wait_for_real_game(180, stop=self.cancel.is_set, observer=observer, exe_dir=inst.exe.parent)
         if pid is None:
             self.set("game", FAILED, "Steep did not start")
             return False

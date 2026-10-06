@@ -66,11 +66,14 @@ repository depends on it.
 ## Launcher
 
 `steep-launcher` (Windows, runs on the PC with the game; settings in `launcher.toml`, see
-`launcher.example.toml`) walks through these steps when you press **Play**; each step only checks unless
-something is missing:
+`launcher.example.toml`) works with both versions of Steep: the **Steam** version and the **Ubisoft
+Connect** version. It finds them wherever they are installed, from what Steam (its libraries and app
+manifest) and Ubisoft Connect (its install records) note about them. With both installed it shows
+**Play (Steam)** and **Play (Ubisoft Connect)**, otherwise a single **Play**. Pressing Play walks through
+these steps; each step only checks unless something is missing:
 
-1. **Game files**: finds Steam, Steep and Ubisoft Connect, and checks that `Steep.exe` is a build the TLS
-   helper supports.
+1. **Game files**: finds the chosen Steep, Ubisoft Connect (and Steam for the Steam version), and checks
+   that `Steep.exe` is a build the TLS helper supports.
 2. **Server**: reaches it, or starts it locally.
 3. **DNS**: every Ubisoft hostname (`steepserver/hostnames.py`) must resolve to the server address. If not,
    it shows the lines to add to your hosts file or to your own DNS server, and offers to add them to the
@@ -78,13 +81,14 @@ something is missing:
 4. **Certificate**: gets the server's CA and, if Windows doesn't trust it yet, explains and installs it
    for your user.
 5. **Ubisoft Connect**: restarts it if it is not signed in to the server, then waits for its login.
-6. **Steep**: starts it through Steam, attaches the TLS helper (`native/`) and waits until the game is
-   online; when it closes, the launcher cleans up.
+6. **Steep**: starts it through Steam or Ubisoft Connect, attaches the TLS helper (`native/`) to the game
+   from that install and waits until the game is online; when it closes, the launcher cleans up.
 
 The TLS helper makes the game accept the server's certificate: `native/hook_guard.dll` traps the game's
 certificate check without changing code bytes at first, `native/armer.exe` keeps that trap armed and then
-patches the check once the game's integrity check is over. It only fits the `Steep.exe` build listed in
-`steeplauncher/game.py`. Game files are never modified on disk.
+patches the check once the game's integrity check is over. It only fits the `Steep.exe` builds listed in
+`steeplauncher/game.py` (the Steam and the Ubisoft Connect download of the final update: the same
+compiled game, packaged differently). Game files are never modified on disk.
 
 ### Restoring your PC
 

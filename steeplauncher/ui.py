@@ -1,11 +1,12 @@
-"""Plain Tkinter window: one row per step with its state, text and buttons; Play / Logs / Quit.
+"""Plain Tkinter window: one row per step with its state, text and buttons; Play (one button per installed
+Steep version) / Restore system / Logs / Quit.
 Deliberately simple (functionality first)."""
 from __future__ import annotations
 
 import tkinter as tk
 from tkinter import messagebox, ttk
 
-from .session import ACTION, FAILED, OK, PENDING, RUNNING, Session
+from .session import ACTION, FAILED, OK, PENDING, RUNNING, Session, play_buttons
 
 ICONS = {PENDING: "·", RUNNING: "…", OK: "✔", ACTION: "?", FAILED: "✖"}
 COLORS = {PENDING: "gray", RUNNING: "blue", OK: "green", ACTION: "darkorange", FAILED: "red"}
@@ -22,7 +23,9 @@ class LauncherWindow:
 
         top = ttk.Frame(self.root, padding=8)
         top.pack(fill="x")
-        ttk.Button(top, text="Play", command=session.start).pack(side="left")
+        self.play_bar = ttk.Frame(top)                  # one Play button per installed version
+        self.play_bar.pack(side="left")
+        self.shown_buttons: list[str] | None = None
         ttk.Button(top, text="Restore system…", command=session.restore).pack(side="left", padx=6)
         ttk.Button(top, text="Open logs", command=session.open_logs).pack(side="left")
         ttk.Button(top, text="Quit", command=self.quit).pack(side="right")
@@ -31,7 +34,19 @@ class LauncherWindow:
         self.body.pack(fill="both", expand=True)
         self.render()
 
+    def render_play_buttons(self) -> None:
+        buttons = play_buttons(self.session.installs)
+        if [label for label, _ in buttons] == self.shown_buttons:
+            return
+        for w in self.play_bar.winfo_children():
+            w.destroy()
+        for label, install in buttons:
+            ttk.Button(self.play_bar, text=label, command=lambda i=install: self.session.start(i)).pack(
+                side="left", padx=(0, 4))
+        self.shown_buttons = [label for label, _ in buttons]
+
     def render(self) -> None:
+        self.render_play_buttons()
         for w in self.body.winfo_children():
             w.destroy()
         for row, step in enumerate(self.session.steps):
