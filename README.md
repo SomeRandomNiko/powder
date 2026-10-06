@@ -126,10 +126,6 @@ files are never changed.
 `bodies/` (logs the game uploads), `tls/` (local CA and server certificate), `nex_signing_key.pem`, and
 `launcher/` (launcher log, hosts-file backups, the server's CA as downloaded by the launcher).
 
-Coming from before the rename to Powder: `data/steep.db` is moved to `data/powder.db` on the next start,
-and an existing CA named "steepserver local CA" keeps working; Restore system also removes it and the
-old hosts-file block.
-
 ## Ports
 
 | Port | Protocol | What |
@@ -243,19 +239,6 @@ native/               TLS helper (C, built with zig)
 plugins/              your plugins (_example.py shows the API)
 tests/                pytest; synthetic.py = made-up recordings and pack used by the tests
 ```
-
-## Extending
-
-- **New NEX method**: add a function to a module in `transport/nex/handlers/` (or a new module listed
-  in `handlers/__init__.py`): `fn(ctx, params: Reader) -> bytes` (may be `async`). `ctx.profile_id`,
-  `ctx.services`, `ctx.conn`. Raise `Fallthrough` to use the pack's reply instead.
-- **New HTTPS endpoint**: add a route in `transport/https/routes_*.py`; keep logic in `services/`.
-- **Schema change**: add `db/migrations/000N_name.sql`; it is applied on the next start.
-- **Plugin**: drop `plugins/name.py` with `setup(api)`; see `powder/server/plugins/api.py`.
-- **Several players**: map machines to profiles in `[players.bind]` (client IP -> profile id) and set
-  `public_host` to the host's LAN/VPN address. Each player gets their own inventory and stats.
-- **Another Steep.exe build**: it must be verified to have the TLS helper's patch spot at the same place
-  before its hash goes into `powder/launcher/game.py`.
 
 ## Roadmap
 
