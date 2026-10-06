@@ -293,16 +293,40 @@ class Session:
             pass
         os.startfile(launch_url(inst, self.cfg.steam_app_id))
         observer = attach.ProcessObserver(log)
-        pid = attach.wait_for_real_game(180, stop=self.cancel.is_set, observer=observer, exe_dir=inst.exe.parent)
-        if pid is None:
-            self.set("game", FAILED, "Steep did not start")
-            return False
+        timeout = 180
+        for _ in range(3):              # a process that exits right away was a starter: wait for the next one
+            pid = attach.wait_for_real_game(timeout, stop=self.cancel.is_set, observer=observer,
+                                            exe_dir=inst.exe.parent)
+            if pid is None:
+                self.set("game", FAILED, "Steep did not start")
+                return False
+            started = time.monotonic()
+            online = self.attach_and_watch(pid, observer)
+            if online is not None:
+                break
+            log.info("game pid %d exited after %.1f s without going online: waiting for the next one",
+                     pid, time.monotonic() - started)
+            self.set("game", RUNNING, "that was a starter process; waiting for the game itself")
+            timeout = 60
+        else:
+            online = False
+        self.set("game", OK if online else FAILED,
+                 "game closed - press Play to start it again" if online else
+                 "game closed before going online - press Play to try again")
+        return True
+
+    def attach_and_watch(self, pid: int, observer) -> bool | None:
+        """Attach the helper to `pid` and wait until it exits. True/False: whether it went online; None:
+        it exited within 30 s without going online (a starter process, not the game)."""
+        started = time.monotonic()
         self.set("game", RUNNING, f"attaching the TLS helper (pid {pid})")
         for attempt in range(20):                        # right after start-up it may not be ready yet
             if attach.load_dll(pid):
                 break
             self.wait(0.5)
         else:
+            if pid not in {p.pid for p in attach.game_processes()}:
+                return None                              # gone already: a starter
             self.set("game", FAILED, "could not load the TLS helper into the game")
             return False
         for _ in range(100):
@@ -318,13 +342,12 @@ class Session:
             if not online and st and st.get("game"):
                 online = True
                 self.set("game", OK, "online on the server - have fun")
-            self.wait(2)
+            self.wait(1 if time.monotonic() - started < 30 else 2)
         observer.poll()
-        self.set("game", OK if online else FAILED,
-                 "game closed - press Play to start it again" if online else
-                 "game closed before going online - press Play to try again")
         self.end_game()
-        return True
+        if not online and time.monotonic() - started < 30:
+            return None
+        return online
 
     # ---- restore system ----------------------------------------------------------------------------
     def restore_game(self) -> bool:

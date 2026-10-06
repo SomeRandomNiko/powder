@@ -144,9 +144,10 @@ class ProcessObserver:
                               now - self.seen[pid])
 
 
-# Steam starts a Steep.exe that only hands over to Ubisoft Connect and exits after ~2 s; Connect's
-# game launcher then starts the real game. Both have the same command line, so the parent decides.
-CONNECT_PARENTS = {"ubisoftgamelauncher.exe", "ubisoftgamelauncher64.exe", "upc.exe", "ubisoftconnect.exe"}
+# Both versions start the game in two hops: a short-lived Steep.exe (started by steam.exe for the Steam
+# version, by upc.exe for the Ubisoft Connect version) hands over and exits after ~2-3 s; Connect's game
+# launcher then starts the real game. Same exe and command line, so the parent decides.
+CONNECT_PARENTS = {"ubisoftgamelauncher.exe", "ubisoftgamelauncher64.exe"}
 
 
 def real_game_pid(min_threads: int = 20, exe_dir: Path | None = None) -> int | None:

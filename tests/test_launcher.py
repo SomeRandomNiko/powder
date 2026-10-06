@@ -156,6 +156,8 @@ def test_real_game_is_the_one_connect_started(monkeypatch):
     assert attach.real_game_pid() == 11                 # by parent, even before it has many threads
     procs[:] = [(1, 0, 90, "steam.exe"), (10, 1, 6, "Steep.exe")]
     assert attach.real_game_pid() is None               # only the starter: not the game
+    procs[:] = [(3, 0, 60, "upc.exe"), (13, 3, 6, "Steep.exe")]
+    assert attach.real_game_pid() is None               # Connect version's starter (started by upc.exe)
     procs[:] = [(5, 0, 9, "renamedlauncher.exe"), (12, 5, 37, "Steep.exe")]
     assert attach.real_game_pid() == 12                 # fallback: thread count
     # both versions running: only the one from the chosen install counts
@@ -326,3 +328,43 @@ def test_console_restore_on_a_clean_pc(tmp_path, monkeypatch):
     (tmp_path / "launcher.toml").write_text("")
     monkeypatch.setattr("builtins.input", lambda *a: "2")           # "Done", not "Start Ubisoft Connect"
     assert main(["-c", str(tmp_path / "launcher.toml"), "--restore"]) == 0
+
+
+def test_run_game_skips_a_starter_that_exits(tmp_path, monkeypatch):
+    """If the attached process turns out to be a starter (exits within seconds), wait for the real game."""
+    from steeplauncher import attach, server
+    import steeplauncher.session as session_mod
+    alive: set[int] = set()
+    found = iter([101, 202])                         # the starter first, then the game
+    attached = []
+
+    def wait_for_real_game(*a, **k):
+        pid = next(found)
+        alive.add(pid)
+        return pid
+
+    def load_dll(pid):
+        attached.append(pid)
+        if pid == 101:
+            alive.discard(101)                       # the starter exits right after the attach
+        return True
+
+    def status(*a, **k):
+        if 202 in alive:
+            alive.discard(202)                       # the game goes online, then the player quits
+            return {"game": [1]}
+        return {"game": []}
+
+    monkeypatch.setattr(session_mod.os, "startfile", lambda url: None, raising=False)
+    monkeypatch.setattr(attach, "wait_for_real_game", wait_for_real_game)
+    monkeypatch.setattr(attach, "load_dll", load_dll)
+    monkeypatch.setattr(attach, "log_has", lambda text: True)
+    monkeypatch.setattr(attach, "start_armer", lambda pid: None)
+    monkeypatch.setattr(attach, "game_processes", lambda: [attach.GameProcess(p, 40) for p in sorted(alive)])
+    monkeypatch.setattr(server, "status", status)
+    s = Session(LauncherConfig(), tmp_path)
+    s.wait = lambda seconds: None
+    s.install = locate.Install(locate.CONNECT, tmp_path / "Steep.exe", 3279)
+    s.steps = session_mod.play_steps()
+    assert s.run_game()
+    assert attached == [101, 202] and s.step("game").state == "ok"
