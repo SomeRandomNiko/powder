@@ -10,3 +10,5 @@ native/bin/
 /gamedata
 /gamedata.building
 launcher.toml
+/build/
+/dist/

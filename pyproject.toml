@@ -1,7 +1,9 @@
 [project]
 name = "powder"
-version = "0.1.0"
+version = "0.0.0"                # releases take their version from the git tag (see powder/version.py)
 description = "Powder: self-hosted stand-in for Steep's online services, to keep an owned copy playable"
+license = "AGPL-3.0-or-later"
+license-files = ["LICENSE"]
 requires-python = ">=3.12"
 dependencies = [
     "aiohttp>=3.9",
@@ -10,13 +12,14 @@ dependencies = [
 
 [project.scripts]
 powder-server = "powder.server.__main__:main"
-powder = "powder.launcher.__main__:main"
+powder = "powder.__main__:main"
 
 [dependency-groups]
 dev = ["pytest>=8", "pytest-asyncio>=0.23"]
+build = ["pyinstaller>=6.10", "pip-licenses>=5"]
 
 [build-system]
-requires = ["hatchling"]
+requires = ["hatchling>=1.27"]
 build-backend = "hatchling.build"
 
 [tool.hatch.build.targets.wheel]
