@@ -9,7 +9,7 @@ from pathlib import Path
 
 @dataclass(frozen=True)
 class ServerConfig:
-    bind: str = "0.0.0.0"
+    bind: str = "127.0.0.1"             # this PC only (no firewall prompt); "0.0.0.0" for friends on a LAN/VPN
     public_host: str = "127.0.0.1"      # address the game uses to reach us (NEX StationURLs)
     https_port: int = 443
     nex_port: int = 6005

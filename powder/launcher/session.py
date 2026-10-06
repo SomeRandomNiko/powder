@@ -18,8 +18,11 @@ from pathlib import Path
 from typing import Callable
 
 from powder.server import trust
+from powder.server.config import Config as ServerSettings
+from powder.server.gamedata import pack
 
-from . import attach, certs, connect, dns, elevate, footprint, game, locate, server
+from ..version import __version__, compatible
+from . import attach, certs, connect, dns, elevate, footprint, game, locate, ports, server
 from .config import LauncherConfig
 
 log = logging.getLogger("powder.launcher")
@@ -48,8 +51,14 @@ class Cancelled(Exception):
 
 
 def play_steps() -> list[Step]:
-    return [Step("files", "Game files"), Step("server", "Server"), Step("dns", "DNS / hosts"),
-            Step("cert", "Certificate"), Step("connect", "Ubisoft Connect"), Step("game", "Steep")]
+    return [Step("files", "Game files"), Step("pack", "Game data"), Step("server", "Server"),
+            Step("dns", "DNS / hosts"), Step("cert", "Certificate"), Step("connect", "Ubisoft Connect"),
+            Step("game", "Steep")]
+
+
+PACK_WHY = ("Powder needs a game-data pack: Steep's store catalogue (which also defines challenge rewards) and "
+            "game configuration. It is Ubisoft's data, so it is not part of Powder; you get it separately as "
+            "a .zip file.")
 
 
 def play_buttons(installs: list[locate.Install]) -> list[tuple[str, locate.Install | None]]:
@@ -135,8 +144,8 @@ class Session:
         if self.thread and self.thread.is_alive():
             return
         self.chosen = install
-        self._launch(play_steps(), (self.check_files, self.check_server, self.check_dns, self.check_cert,
-                                    self.check_connect, self.run_game))
+        self._launch(play_steps(), (self.check_files, self.check_pack, self.check_server, self.check_dns,
+                                    self.check_cert, self.check_connect, self.run_game))
 
     def restore(self) -> None:
         """Restore system: undo what the launcher set up (see footprint.py)."""
@@ -206,10 +215,43 @@ class Session:
         self.set("files", OK, f"{build} in {install.exe.parent}")
         return True
 
+    def server_config(self) -> ServerSettings:
+        return ServerSettings.load(self.cfg.server_config_path())
+
+    def check_pack(self) -> bool:
+        """Local server only: its game-data pack must be there; if not, the user selects the .zip."""
+        if self.cfg.server_mode != "local":
+            self.set("pack", OK, "provided by the server")
+            return True
+        target = self.server_config().gamedata_dir
+        while True:
+            try:
+                manifest = pack.check(target)
+                self.set("pack", OK, f"game-data pack from {manifest.get('built', '?')} ({manifest.get('sandbox', '')})")
+                return True
+            except pack.PackError as e:
+                problem = "" if not target.exists() else f" ({e})"
+            if self.ask("pack", PACK_WHY + problem, ["Select game-data pack…", "Check again"]) == "Check again":
+                continue
+            source = self.pick_file("Select the game-data pack (.zip)")
+            if source is None:
+                continue
+            self.set("pack", RUNNING, f"installing {source.name}")
+            try:
+                pack.install(source, target)
+            except pack.PackError as e:
+                self.ask("pack", f"{source.name} could not be used: {e}", ["OK"])
+
     def check_server(self) -> bool:
         self.set("server", RUNNING, f"reaching {self.cfg.server_address}")
         st = server.status(self.cfg)
         if st is None and self.cfg.server_mode == "local":
+            srv = self.server_config().server
+            needed = [ports.Port(srv.https_port, "TCP", "HTTPS"), ports.Port(srv.crl_port, "TCP", "certificate list"),
+                      ports.Port(srv.nex_port, "UDP", "game server")]
+            while taken := ports.busy(srv.bind, needed):
+                self.ask("server", "The local server cannot start: " + "; ".join(taken) + ". Close that program "
+                         "(or change the port in config.toml), then check again.", ["Check again"])
             self.server_proc = server.ServerProcess(self.cfg)
             self.server_proc.start(self.data_dir / "logs")
             self.set("server", RUNNING, "starting the local server")
@@ -219,8 +261,13 @@ class Session:
                 f"no server answers at {self.cfg.server_address}:{self.cfg.server_https_port}"
             self.set("server", FAILED, where)
             return False
+        theirs = str(st.get("version", "?"))
+        if not compatible(theirs, __version__):
+            self.ask("server", f"The server runs Powder {theirs}, this launcher is Powder {__version__}. Different "
+                     "major versions may not work together; update the older one.", ["Continue anyway"])
         started = " (run by the launcher)" if self.server_proc else " (already running)"
-        self.set("server", OK, f"{self.cfg.server_address}{started}, {st.get('players', 0)} player(s)")
+        self.set("server", OK, f"{self.cfg.server_address}{started}, Powder {theirs}, "
+                               f"{st.get('players', 0)} player(s)")
         return True
 
     def check_dns(self) -> bool:

@@ -1,7 +1,8 @@
 # Copy to config.toml and adjust. Every setting is optional (these are the defaults).
 
 [server]
-bind = "0.0.0.0"
+bind = "127.0.0.1"          # this PC only. For friends on a LAN/VPN: "0.0.0.0" and public_host below
+                            # (Windows then asks once whether to allow Powder through the firewall)
 public_host = "127.0.0.1"   # address the game uses to reach this server (LAN/VPN IP for friends)
 https_port = 443           # HTTPS for the game and Ubisoft Connect, incl. Connect's demux (routed by hostname)
 nex_port = 6005

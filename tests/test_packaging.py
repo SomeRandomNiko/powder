@@ -52,3 +52,95 @@ def test_config_defaults_live_next_to_the_missing_file(tmp_path):
     cfg = Config.load(tmp_path / "Powder" / "config.toml")
     assert cfg.data_dir == tmp_path / "Powder" / "data"
     assert cfg.gamedata_dir == tmp_path / "Powder" / "gamedata"
+
+
+# ---- game-data pack on a new PC ------------------------------------------------------------------
+def test_pack_zip_and_install_round_trip(pack_dir, tmp_path):
+    from powder.server.gamedata import pack
+    z = tmp_path / "steep-gamedata.zip"
+    pack.zip_pack(pack_dir, z)
+    target = tmp_path / "Powder" / "gamedata"
+    manifest = pack.install(z, target)
+    assert pack.check(target) == manifest and not (tmp_path / "Powder" / "gamedata.importing").exists()
+    pack.install(pack_dir, target)                       # a folder works too, replacing the old pack
+    assert pack.check(target)["files"] == manifest["files"]
+
+
+def test_bad_packs_are_rejected_and_keep_the_old_one(pack_dir, tmp_path):
+    import warnings
+    import zipfile
+
+    import pytest
+    from powder.server.gamedata import pack
+    target = tmp_path / "gamedata"
+    pack.install(pack_dir, target)
+    not_zip = tmp_path / "notes.zip"
+    not_zip.write_text("hello")
+    evil = tmp_path / "evil.zip"
+    with zipfile.ZipFile(evil, "w") as z:
+        z.writestr("../outside.txt", "x")
+    changed = tmp_path / "changed.zip"
+    pack.zip_pack(pack_dir, changed)
+    with zipfile.ZipFile(changed, "a") as z, warnings.catch_warnings():
+        warnings.simplefilter("ignore")                   # the duplicate entry is the point
+        z.writestr("gamedata/offers.json", "{}")          # tampered: hash no longer matches
+    for bad in (not_zip, evil, changed, tmp_path / "missing.zip"):
+        with pytest.raises(pack.PackError):
+            pack.install(bad, target)
+    assert pack.check(target) and not (tmp_path / "outside.txt").exists()
+
+
+def test_launcher_asks_for_the_pack_and_installs_it(pack_dir, tmp_path):
+    from powder.launcher.config import LauncherConfig
+    from powder.launcher.session import Session, play_steps
+    from powder.server.gamedata import pack
+    z = tmp_path / "pack.zip"
+    pack.zip_pack(pack_dir, z)
+    (tmp_path / "launcher.toml").write_text("")
+
+    class Scripted(Session):
+        asked = []
+
+        def ask(self, key, text, actions, details=""):
+            self.asked.append((key, actions))
+            return actions[0]
+
+        def pick_file(self, title):
+            return z
+
+    s = Scripted(LauncherConfig.load(tmp_path / "launcher.toml"), tmp_path / "data" / "launcher")
+    s.steps = play_steps()
+    assert s.check_pack() and s.step("pack").state == "ok"
+    assert s.asked == [("pack", ["Select game-data pack…", "Check again"])]
+    assert pack.check(tmp_path / "gamedata")
+
+
+# ---- ports ---------------------------------------------------------------------------------------
+NETSTAT = """
+  Proto  Local Address          Foreign Address        State           PID
+  TCP    0.0.0.0:80             0.0.0.0:0              LISTENING       4
+  TCP    127.0.0.1:4430         0.0.0.0:0              LISTENING       77
+  TCP    127.0.0.1:443          127.0.0.1:50000        ESTABLISHED     88
+  TCP    [::]:443               [::]:0                 LISTENING       1234
+  UDP    0.0.0.0:6005           *:*                                    999
+"""
+
+
+def test_port_owner_from_netstat():
+    from powder.launcher.ports import Port, owner_pid
+    assert owner_pid(NETSTAT, Port(80, "TCP", "x")) == 4
+    assert owner_pid(NETSTAT, Port(443, "TCP", "x")) == 1234       # the listening one, not 4430/established
+    assert owner_pid(NETSTAT, Port(6005, "UDP", "x")) == 999
+    assert owner_pid(NETSTAT, Port(6006, "UDP", "x")) is None
+
+
+def test_busy_port_is_detected(monkeypatch):
+    import socket
+    from powder.launcher import ports
+    with socket.socket() as s:
+        s.bind(("127.0.0.1", 0))
+        s.listen()
+        taken = s.getsockname()[1]
+        monkeypatch.setattr(ports, "process_name", lambda pid: "test.exe")
+        lines = ports.busy("127.0.0.1", [ports.Port(taken, "TCP", "HTTPS")])
+    assert len(lines) == 1 and f"port {taken} (TCP, HTTPS)" in lines[0]

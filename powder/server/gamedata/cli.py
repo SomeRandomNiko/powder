@@ -1,4 +1,4 @@
-"""powder-server gamedata build <recordings> <pack>   |   powder-server gamedata verify [<pack>]"""
+"""powder-server gamedata build <recordings> <pack> | verify [<pack>] | zip <file.zip> | install <zip|folder>"""
 from __future__ import annotations
 
 from pathlib import Path
@@ -15,9 +15,26 @@ def add_parser(sub) -> None:
     b.add_argument("pack", type=Path)
     v = g.add_parser("verify", help="check a pack's manifest and file hashes")
     v.add_argument("pack", type=Path, nargs="?")
+    z = g.add_parser("zip", help="pack the game-data pack into one .zip (to bring it to another PC)")
+    z.add_argument("out", type=Path)
+    z.add_argument("--pack", type=Path, help="pack folder (default: the configured one)")
+    i = g.add_parser("install", help="install a game-data pack from a .zip or folder")
+    i.add_argument("source", type=Path)
 
 
 def run(args, config) -> int:
+    if args.gamedata_cmd in ("zip", "install"):
+        try:
+            if args.gamedata_cmd == "zip":
+                m = pack.zip_pack(args.pack or config.gamedata_dir, args.out)
+                print(f"wrote {args.out} (pack built {m.get('built')})")
+            else:
+                m = pack.install(args.source, config.gamedata_dir)
+                print(f"installed the game-data pack (built {m.get('built')}) into {config.gamedata_dir}")
+            return 0
+        except pack.PackError as e:
+            print(e)
+            return 1
     if args.gamedata_cmd == "build":
         report = builder.build(args.recordings, args.pack)
         for name, n in report.kept.items():
