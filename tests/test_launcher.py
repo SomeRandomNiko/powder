@@ -157,6 +157,11 @@ def test_launch_url_per_version():
     assert launch_url(locate.Install(locate.CONNECT, Path("c"), 3279), 460920) == "uplay://launch/3279/0"
 
 
+def test_native_helpers_are_looked_up_in_the_repository():
+    from powder.launcher import attach
+    assert attach.NATIVE_BIN == Path(__file__).resolve().parents[1] / "native" / "bin"
+
+
 def test_real_game_is_the_one_connect_started(monkeypatch):
     from powder.launcher import attach
     # (pid, parent pid, threads, exe) as in a real launch: Steam's starter, then Connect's real game

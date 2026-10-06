@@ -13,7 +13,7 @@ from ctypes import wintypes
 from dataclasses import dataclass
 from pathlib import Path
 
-NATIVE_BIN = Path(__file__).resolve().parent.parent / "native" / "bin"
+NATIVE_BIN = Path(__file__).resolve().parents[2] / "native" / "bin"     # <repo>/native/bin
 DLL = NATIVE_BIN / "hook_guard.dll"
 ARMER = NATIVE_BIN / "armer.exe"
 LOG = NATIVE_BIN / "hook_guard.log"
