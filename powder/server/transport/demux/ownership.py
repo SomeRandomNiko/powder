@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import logging
 
+from ...builtin import products as builtin_products
 from . import pb
 from .services import ServiceContext, ServiceRequest, handler, make_reply
 
@@ -41,10 +42,14 @@ def initialize_body(products: list[bytes]) -> list:
 
 @handler(SERVICE, INITIALIZE)
 def initialize(ctx: ServiceContext, req: ServiceRequest) -> bytes | None:
+    cloud_saves = ctx.services.config.server.connect_cloud_saves
     products = ctx.services.assets.products.products
-    if not products:
-        log.warning("demux owned games: no products in the game-data pack; Connect will show no games")
-    if not ctx.services.config.server.connect_cloud_saves:
+    if not products:                                    # no game-data pack: the server's own entries
+        products = builtin_products.entries(cloud_saves=cloud_saves,
+                                            achievements_file=ctx.services.assets.achievements_file())
+        log.info("demux owned games: %d products (built in, no game-data pack)", len(products))
+        return make_reply(req, INITIALIZE, initialize_body(products))
+    if not cloud_saves:
         products, changed = without_cloud_saves(products)
         log.info("demux owned games: %d products, cloud saves switched off for %d", len(products), changed)
     return make_reply(req, INITIALIZE, initialize_body(products))

@@ -94,6 +94,15 @@ class Assets:
                 continue
         return None
 
+    def achievements_file(self) -> str | None:
+        """File name of Ubisoft Connect's achievement definitions in the pack (referenced in Steep's product
+        configuration; Connect downloads it), or None without one."""
+        for e in self.connect_http.entries:
+            path = e.path.split("?")[0]
+            if path.endswith(".zip") and "/assets/" in path:
+                return path.rsplit("/", 1)[1]
+        return None
+
     def achievement_names(self, lang: str = "en-US") -> dict[int, tuple[str, str]]:
         """{achievement id: (name, description)} of Steep's achievements, from the pack."""
         raw = self._achievement_file(f"{lang}_loc.txt")

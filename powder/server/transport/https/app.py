@@ -13,12 +13,14 @@ Routes match on the path only; the host matters only for the pack.
 from __future__ import annotations
 
 import datetime
+import json
 import logging
 from pathlib import Path
 
 from aiohttp import web
 
 from ... import tls
+from ...builtin import http as builtin_http
 from ...constants import APP_ID
 from ...core.identity import parse_authorization
 from . import routes_profile, routes_powder, routes_ubi
@@ -113,6 +115,10 @@ async def fallback(request: web.Request) -> web.Response:
         if hit:
             break
     if hit is None:
+        built = builtin_http.lookup(request.method, request.path)
+        if built is not None:                           # no pack (or not in it): the server's own reply
+            request[HOW] = "builtin"
+            return web.Response(body=json.dumps(built).encode(), headers={"Content-Type": routes_ubi.JSON})
         request[HOW] = "UNMATCHED"
         return web.Response(body=b"{}", headers={"Content-Type": routes_ubi.JSON})
     fixture, tier = hit
