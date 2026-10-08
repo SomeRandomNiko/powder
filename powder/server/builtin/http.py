@@ -1,14 +1,25 @@
 """HTTPS replies the server builds itself when no game-data pack answers (see builtin/__init__.py)."""
 from __future__ import annotations
 
+import hashlib
 import re
 
 from . import sdk
+
+EMPTY_ITEMS = b"[]"
+# version of the space's item list (the game checks it before using items; {} makes it log out again)
+ITEMS_VERSION = {"lastModified": "2016-12-01T00:00:00.000Z",
+                 "sha256": hashlib.sha256(EMPTY_ITEMS).hexdigest().upper(),
+                 "md5": hashlib.md5(EMPTY_ITEMS).hexdigest().upper()}
 
 # (method, path regex) -> fn(match) -> JSON-able reply (None: not ours after all)
 ROUTES = [
     ("GET", re.compile(r"/v\d+/applications/([0-9a-fA-F-]{36})/configuration"),
      lambda m: sdk.configuration(m.group(1))),
+    ("GET", re.compile(r"/v1/spaces/[0-9a-fA-F-]{36}/items/all"), lambda m: ITEMS_VERSION),
+    ("GET", re.compile(r"/v2/spaces/global/ubiconnect/challenges/api/legacy/empty"), lambda m: []),
+    # event types the server wants reported: none needed (the game still sends its events)
+    ("GET", re.compile(r"/v4/spaces/[0-9a-fA-F-]{36}/configs/events"), lambda m: {"types": []}),
 ]
 
 
