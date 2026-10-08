@@ -4,7 +4,6 @@ Deliberately simple (functionality first)."""
 from __future__ import annotations
 
 import ctypes
-import threading
 import tkinter as tk
 from pathlib import Path
 from tkinter import filedialog, messagebox, ttk
@@ -38,7 +37,6 @@ class LauncherWindow:
         self.root.geometry("760x520")
         self.root.protocol("WM_DELETE_WINDOW", self.quit)
         session.on_update = lambda: self.root.after(0, self.render)
-        session.pick_file = self.pick_file
 
         top = ttk.Frame(self.root, padding=8)
         top.pack(fill="x")
@@ -50,24 +48,50 @@ class LauncherWindow:
         ttk.Button(top, text="Open logs", command=session.open_logs).pack(side="left")
         ttk.Button(top, text="Close" if restore_only else "Quit", command=self.quit).pack(side="right")
 
+        self.pack_bar = ttk.Frame(self.root, padding=(8, 0, 8, 4))   # the game-data pack, set up apart from Play
+        if not restore_only:
+            self.pack_bar.pack(fill="x")
+            self.use_pack = tk.BooleanVar(value=True)
+            self.render_pack()
+
         self.body = ttk.Frame(self.root, padding=8)
         self.body.pack(fill="both", expand=True)
         self.render()
         if restore_only:
             self.root.after(100, session.restore)
 
-    def pick_file(self, title: str) -> Path | None:
-        """Called from the session's worker thread: show the dialog on the Tk thread and wait for it."""
-        done, result = threading.Event(), {}
+    def render_pack(self) -> None:
+        """No pack: "Choose pack…"; a pack: a checkbox to use it or not (remembered; applies at the next Play)."""
+        for w in self.pack_bar.winfo_children():
+            w.destroy()
+        info = self.session.pack_info()
+        if info is None:                                 # remote server: its own pack, if any
+            return
+        tk.Label(self.pack_bar, text="Game data", font=("Segoe UI", 10, "bold")).pack(side="left", padx=(0, 8))
+        if info.installed:
+            self.use_pack.set(info.enabled)
+            ttk.Checkbutton(self.pack_bar, text=f"Use the game-data pack (built {info.built})",
+                            variable=self.use_pack, command=self.toggle_pack).pack(side="left")
+            note = "store and challenge rewards on" if info.enabled else "off: empty store, no challenge rewards"
+        else:
+            ttk.Button(self.pack_bar, text="Choose pack…", command=self.choose_pack).pack(side="left")
+            note = "none (optional): the store is empty and challenges give no rewards"
+            if info.problem:
+                note += f" - the installed one can't be used: {info.problem}"
+        tk.Label(self.pack_bar, text=note, fg="gray").pack(side="left", padx=8)
 
-        def show():
-            name = filedialog.askopenfilename(parent=self.root, title=title,
-                                              filetypes=[("Game-data pack", "*.zip"), ("All files", "*.*")])
-            result["path"] = Path(name) if name else None
-            done.set()
-        self.root.after(0, show)
-        done.wait()
-        return result["path"]
+    def choose_pack(self) -> None:
+        name = filedialog.askopenfilename(parent=self.root, title="Choose the game-data pack (.zip)",
+                                          filetypes=[("Game-data pack", "*.zip"), ("All files", "*.*")])
+        if name:
+            error = self.session.install_pack(Path(name))
+            if error:
+                messagebox.showerror("Game-data pack", f"{Path(name).name} can't be used: {error}")
+        self.render_pack()
+
+    def toggle_pack(self) -> None:
+        self.session.set_pack_enabled(self.use_pack.get())
+        self.render_pack()
 
     def render_play_buttons(self) -> None:
         if self.restore_only:

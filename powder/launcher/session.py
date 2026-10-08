@@ -7,6 +7,7 @@ Restore system:  Steep closed -> server stopped -> Connect quit -> hosts entries
 """
 from __future__ import annotations
 
+import json
 import logging
 import os
 import queue
@@ -53,16 +54,17 @@ class Cancelled(Exception):
 
 
 def play_steps() -> list[Step]:
-    return [Step("files", "Game files"), Step("pack", "Game data"), Step("server", "Server"),
-            Step("dns", "DNS / hosts"), Step("cert", "Certificate"), Step("connect", "Ubisoft Connect"),
-            Step("game", "Steep")]
+    return [Step("files", "Game files"), Step("server", "Server"), Step("dns", "DNS / hosts"),
+            Step("cert", "Certificate"), Step("connect", "Ubisoft Connect"), Step("game", "Steep")]
 
 
-PACK_WHY = ("No game-data pack is installed. It holds Steep's store catalogue (which also defines challenge "
-            "rewards) and Ubisoft Connect's achievement and reward pages. It is Ubisoft's data, so it is not part "
-            "of Powder; you get it separately as a .zip file. Without it you can still play, but the store is "
-            "empty and challenges give no rewards.")
-PLAY_WITHOUT_PACK = "Play without it"
+@dataclass
+class PackInfo:
+    """The local server's game-data pack, as the launcher shows it (None in remote mode)."""
+    installed: bool
+    built: str = ""                       # the pack's build date
+    enabled: bool = True                  # the checkbox: does the server use it
+    problem: str = ""                     # why an installed pack can't be used
 
 
 def play_buttons(installs: list[locate.Install]) -> list[tuple[str, locate.Install | None]]:
@@ -98,10 +100,6 @@ class Session:
         self.installs: list[locate.Install] = self.detect()   # which Steep versions are installed
         self.chosen: locate.Install | None = None              # the one the user pressed Play for
         self.install: locate.Install | None = None             # the one being played (after check_files)
-
-    def pick_file(self, title: str) -> Path | None:
-        """Ask the user for a file; the window and the console replace this."""
-        return None
 
     def detect(self) -> list[locate.Install]:
         self.installs = locate.find_installs(self.cfg.steam_app_id, self.cfg.steep_exe)
@@ -148,7 +146,7 @@ class Session:
         if self.thread and self.thread.is_alive():
             return
         self.chosen = install
-        self._launch(play_steps(), (self.check_files, self.check_pack, self.check_server, self.check_dns,
+        self._launch(play_steps(), (self.check_files, self.check_server, self.check_dns,
                                     self.check_cert, self.check_connect, self.run_game))
 
     def restore(self) -> None:
@@ -222,37 +220,62 @@ class Session:
     def server_config(self) -> ServerSettings:
         return ServerSettings.load(self.cfg.server_config_path())
 
-    def check_pack(self) -> bool:
-        """Local server only: its game-data pack must be there; if not, the user selects the .zip."""
+    # ---- game-data pack (local server only; set up apart from Play, remembered) --------------------------
+    def _prefs_path(self) -> Path:
+        return self.data_dir / "settings.json"
+
+    def _prefs(self) -> dict:
+        try:
+            return json.loads(self._prefs_path().read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            return {}
+
+    def use_pack(self) -> bool:
+        return bool(self._prefs().get("use_pack", True))
+
+    def pack_info(self) -> PackInfo | None:
         if self.cfg.server_mode != "local":
-            self.set("pack", OK, "provided by the server")
-            return True
+            return None
         target = self.server_config().gamedata_dir
-        while True:
-            try:
-                manifest = pack.check(target)
-                self.set("pack", OK, f"game-data pack from {manifest.get('built', '?')} ({manifest.get('sandbox', '')})")
-                return True
-            except pack.PackError as e:
-                problem = "" if not target.exists() else f" ({e})"
-            choice = self.ask("pack", PACK_WHY + problem, ["Select game-data pack…", PLAY_WITHOUT_PACK, "Check again"])
-            if choice == PLAY_WITHOUT_PACK:
-                self.set("pack", OK, "no game-data pack: playing without store items and rewards")
-                return True
-            if choice == "Check again":
-                continue
-            source = self.pick_file("Select the game-data pack (.zip)")
-            if source is None:
-                continue
-            self.set("pack", RUNNING, f"installing {source.name}")
-            try:
-                pack.install(source, target)
-            except pack.PackError as e:
-                self.ask("pack", f"{source.name} could not be used: {e}", ["OK"])
+        try:
+            manifest = pack.check(target)
+        except pack.PackError as e:
+            return PackInfo(installed=False, problem=str(e) if target.exists() else "")
+        return PackInfo(installed=True, built=str(manifest.get("built", "?")), enabled=self.use_pack())
+
+    def install_pack(self, source: Path) -> str | None:
+        """Install the chosen .zip (or folder) as the local server's pack and switch it on; an error text
+        if it can't be used."""
+        try:
+            pack.install(source, self.server_config().gamedata_dir)
+        except pack.PackError as e:
+            return str(e)
+        self.set_pack_enabled(True)
+        return None
+
+    def set_pack_enabled(self, enabled: bool) -> None:
+        """The checkbox. A server this launcher runs picks it up when it is next (re)started (see
+        check_server)."""
+        prefs = self._prefs()
+        prefs["use_pack"] = enabled
+        self.data_dir.mkdir(parents=True, exist_ok=True)
+        self._prefs_path().write_text(json.dumps(prefs, indent=2), encoding="utf-8")
+        log.info("game-data pack %s", "on" if enabled else "off")
+
+    def wanted_pack(self) -> bool:
+        info = self.pack_info()
+        return bool(info and info.installed and info.enabled)
 
     def check_server(self) -> bool:
         self.set("server", RUNNING, f"reaching {self.cfg.server_address}")
         st = server.status(self.cfg)
+        if st is not None and self.server_proc and self.server_proc.running() \
+                and bool(st.get("gamedata")) != self.wanted_pack():
+            self.set("server", RUNNING, "restarting the local server (game-data pack switched "
+                                        f"{'on' if self.wanted_pack() else 'off'})")
+            self.server_proc.stop()
+            self.server_proc = None
+            st = None
         if st is None and self.cfg.server_mode == "local":
             srv = self.server_config().server
             needed = [ports.Port(srv.https_port, "TCP", "HTTPS"), ports.Port(srv.crl_port, "TCP", "certificate list"),
@@ -261,7 +284,7 @@ class Session:
                 self.ask("server", "The local server cannot start: " + "; ".join(taken) + ". Close that program "
                          "(or change the port in config.toml), then check again.", ["Check again"])
             self.server_proc = server.ServerProcess(self.cfg)
-            self.server_proc.start(self.data_dir / "logs")
+            self.server_proc.start(self.data_dir / "logs", use_pack=self.wanted_pack())
             self.set("server", RUNNING, "starting the local server")
             st = server.wait_up(self.cfg, 30, alive=self.server_proc.running)
         if st is None:

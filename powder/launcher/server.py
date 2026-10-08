@@ -20,12 +20,13 @@ class ServerProcess:
         self.proc: subprocess.Popen | None = None
         self.log_path: Path | None = None
 
-    def start(self, log_dir: Path) -> None:
+    def start(self, log_dir: Path, use_pack: bool = True) -> None:
         log_dir.mkdir(parents=True, exist_ok=True)
         self.log_path = log_dir / "server-console.log"
         out = open(self.log_path, "ab")
+        args = ("server", "-c", str(self.cfg.server_config_path()), "run") + (() if use_pack else ("--no-gamedata",))
         self.proc = subprocess.Popen(
-            paths.self_command("server", "-c", str(self.cfg.server_config_path()), "run"),
+            paths.self_command(*args),
             stdout=out, stderr=subprocess.STDOUT,
             creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
 

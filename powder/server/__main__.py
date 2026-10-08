@@ -3,6 +3,7 @@ powder-cli.exe server run)"""
 from __future__ import annotations
 
 import argparse
+import dataclasses
 import sys
 from pathlib import Path
 
@@ -20,13 +21,17 @@ def main(argv: list[str] | None = None) -> int:
                         help="config file (default: config.toml in Powder's folder; built-in defaults if missing)")
     parser.add_argument("--version", action="version", version=f"Powder {__version__}")
     sub = parser.add_subparsers(dest="cmd", required=True)
-    sub.add_parser("run", help="run the server")
+    run = sub.add_parser("run", help="run the server")
+    run.add_argument("--no-gamedata", action="store_true",
+                     help="ignore the game-data pack (as if none were installed)")
     admin_cli.add_parser(sub)
     gamedata_cli.add_parser(sub)
     args = parser.parse_args(argv)
     config = Config.load(args.config)
 
     if args.cmd == "run":
+        if args.no_gamedata:
+            config = dataclasses.replace(config, server=dataclasses.replace(config.server, use_gamedata=False))
         from . import app
         app.main(config)
         return 0

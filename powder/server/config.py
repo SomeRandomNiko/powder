@@ -18,6 +18,7 @@ class ServerConfig:
                                         # never tries (and fails) to sync them at launch and exit
     data_dir: Path = Path("data")       # powder.db, logs/, TLS cert, NEX key  (relative to the config file)
     gamedata_dir: Path = Path("gamedata")       # game-data pack (store catalogue, configs), see gamedata/
+    use_gamedata: bool = True           # False: run as without a pack even if one is installed
     recordings_dir: Path = Path("recordings")   # your own captures: only read by 'gamedata build' and
                                                 # 'admin import', never while the server runs
     country: str = "US"                 # what Ubisoft Connect is told about the player's location

@@ -24,10 +24,6 @@ class ConsoleSession(Session):
             if pick.isdigit() and 1 <= int(pick) <= len(actions):
                 return actions[int(pick) - 1]
 
-    def pick_file(self, title: str) -> Path | None:
-        typed = input(f"{title} (path, empty to cancel): ").strip().strip('"')
-        return Path(typed) if typed else None
-
 
 def main(argv: list[str] | None = None) -> int:
     p = argparse.ArgumentParser(prog="powder")

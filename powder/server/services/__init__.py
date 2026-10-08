@@ -165,4 +165,10 @@ class Services:
         """Open (or create) data/powder.db; a database from before the rename is moved there first."""
         db = Database(move_legacy_db(config.data_dir))
         db.migrate()
-        return cls(config=config, db=db, assets=assets or Assets.load(config.gamedata_dir))
+        if assets is None:
+            if config.server.use_gamedata:
+                assets = Assets.load(config.gamedata_dir)
+            else:
+                log.info("game-data pack switched off (use_gamedata = false): built-in replies only")
+                assets = Assets()
+        return cls(config=config, db=db, assets=assets)

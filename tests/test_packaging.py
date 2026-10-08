@@ -90,44 +90,46 @@ def test_bad_packs_are_rejected_and_keep_the_old_one(pack_dir, tmp_path):
     assert pack.check(target) and not (tmp_path / "outside.txt").exists()
 
 
-def test_launcher_asks_for_the_pack_and_installs_it(pack_dir, tmp_path):
+def test_launcher_pack_is_chosen_once_and_switched_on_and_off(pack_dir, tmp_path):
+    """Play never asks for a pack: it is installed apart from Play ("Choose pack…") and then switched on
+    and off with a checkbox, remembered across launcher starts."""
     from powder.launcher.config import LauncherConfig
     from powder.launcher.session import Session, play_steps
     from powder.server.gamedata import pack
     z = tmp_path / "pack.zip"
     pack.zip_pack(pack_dir, z)
     (tmp_path / "launcher.toml").write_text("")
+    cfg, data = LauncherConfig.load(tmp_path / "launcher.toml"), tmp_path / "data" / "launcher"
 
-    class Scripted(Session):
-        asked = []
-
-        def ask(self, key, text, actions, details=""):
-            self.asked.append((key, actions))
-            return actions[0]
-
-        def pick_file(self, title):
-            return z
-
-    s = Scripted(LauncherConfig.load(tmp_path / "launcher.toml"), tmp_path / "data" / "launcher")
-    s.steps = play_steps()
-    assert s.check_pack() and s.step("pack").state == "ok"
-    assert s.asked == [("pack", ["Select game-data pack…", "Play without it", "Check again"])]
-    assert pack.check(tmp_path / "gamedata")
+    s = Session(cfg, data)
+    assert "pack" not in [st.key for st in play_steps()]
+    assert s.pack_info().installed is False and not s.wanted_pack()
+    assert s.install_pack(tmp_path / "missing.zip")                       # an error text
+    assert s.install_pack(z) is None and pack.check(tmp_path / "gamedata")
+    info = s.pack_info()
+    assert info.installed and info.enabled and info.built and s.wanted_pack()
+    s.set_pack_enabled(False)
+    again = Session(cfg, data)                                            # remembered
+    assert again.pack_info().installed and not again.pack_info().enabled and not again.wanted_pack()
 
 
-def test_launcher_can_play_without_a_pack(tmp_path):
+def test_launcher_pack_is_the_servers_business_in_remote_mode(tmp_path):
     from powder.launcher.config import LauncherConfig
-    from powder.launcher.session import PLAY_WITHOUT_PACK, Session, play_steps
-    (tmp_path / "launcher.toml").write_text("")
+    from powder.launcher.session import Session
+    (tmp_path / "launcher.toml").write_text('server_mode = "remote"\nserver_address = "10.0.0.2"\n')
+    assert Session(LauncherConfig.load(tmp_path / "launcher.toml"), tmp_path / "data").pack_info() is None
 
-    class Scripted(Session):
-        def ask(self, key, text, actions, details=""):
-            return PLAY_WITHOUT_PACK
 
-    s = Scripted(LauncherConfig.load(tmp_path / "launcher.toml"), tmp_path / "data" / "launcher")
-    s.steps = play_steps()
-    assert s.check_pack() and s.step("pack").state == "ok" and "without" in s.step("pack").text
-    assert not (tmp_path / "gamedata").exists()
+def test_server_can_ignore_an_installed_pack(config, tmp_path):
+    import dataclasses
+
+    from powder.server.services import Services
+    off = dataclasses.replace(config, server=dataclasses.replace(config.server, use_gamedata=False))
+    services = Services.open(off)
+    try:
+        assert services.assets.empty
+    finally:
+        services.db.close()
 
 
 # ---- ports ---------------------------------------------------------------------------------------

@@ -24,6 +24,7 @@ async def status(request: web.Request) -> web.Response:
     request[HOW] = "powder-status"
     return web.json_response({"server": "powder", "version": __version__,
                               "players": len(services.repos.players.all()),
+                              "gamedata": not services.assets.empty,
                               "connect": connect, "game": game})
 
 

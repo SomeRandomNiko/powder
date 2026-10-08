@@ -86,9 +86,9 @@ A game-data pack (`.zip`, see below) is optional: it adds the store and challeng
 1. Download `Powder-Setup-vX.Y.Z.exe` from the [Releases](../../releases) page and run it. It installs for
    your Windows user only (no admin rights). While Powder is not code-signed, Windows SmartScreen warns
    about an unknown app: **More info → Run anyway**.
-2. Start **Powder** and press **Play**. The first time, it asks for a game-data pack (**Play without it**
-   is fine), then walks you through what it needs to set up (every Windows prompt is explained before it
-   appears).
+2. Start **Powder** and press **Play**. It walks you through what it needs to set up (every Windows
+   prompt is explained before it appears). If you have a game-data pack, add it once with **Choose
+   pack…**; a checkbox then switches it on and off.
 
 Powder keeps your progress, the game-data pack and its settings in `%LOCALAPPDATA%\Powder`, apart from
 the program, so updating (install the new version over the old one) never touches them. Uninstalling
@@ -145,7 +145,7 @@ library and store. Settings Connect still holds in its browser cache are never o
 answers "not modified"). If Connect has never been online on a PC and fails with dolphin-032, start it
 once normally (without Powder: **Restore system**, sign in to your real account, then Play again).
 
-The pack travels as one `.zip`: the launcher asks for it when it is missing (checking format and file
+The pack travels as one `.zip`: the launcher installs it with **Choose pack…** (checking format and file
 hashes before using it), and the same works from a console:
 
 ```
@@ -177,22 +177,25 @@ these steps; each step only checks unless something is missing:
 
 1. **Game files**: finds the chosen Steep, Ubisoft Connect (and Steam for the Steam version), and checks
    that `Steep.exe` is a build the TLS helper supports.
-2. **Game data**: the local server's game-data pack; if it is missing, it offers to install the `.zip`
-   or to play without it.
-3. **Server**: reaches it, or starts it locally (`server_mode = "local"`, the default) after checking that
-   its ports are free (if not, it names the program using them). With `server_mode = "remote"` and
-   `server_address` it uses a server on another PC instead, and warns if that server's major version
-   differs.
-4. **DNS**: every Ubisoft hostname (`powder/server/hostnames.py`) must resolve to the server address. If not,
+2. **Server**: reaches it, or starts it locally (`server_mode = "local"`, the default) after checking that
+   its ports are free (if not, it names the program using them), with or without the game-data pack as
+   the checkbox says (a server it started with the other setting is restarted). With
+   `server_mode = "remote"` and `server_address` it uses a server on another PC instead (its pack is that
+   server's business), and warns if that server's major version differs.
+3. **DNS**: every Ubisoft hostname (`powder/server/hostnames.py`) must resolve to the server address. If not,
    it shows the lines to add to your own DNS server, or adds them to the hosts file for you (the previous
    hosts file is backed up to `data/launcher/hosts-backups/`).
-5. **Certificate**: gets the server's CA and, if Windows doesn't trust it yet, installs it for your user.
-6. **Ubisoft Connect**: restarts it if it is not signed in to the server, then waits for its login (any
+4. **Certificate**: gets the server's CA and, if Windows doesn't trust it yet, installs it for your user.
+5. **Ubisoft Connect**: restarts it if it is not signed in to the server, then waits for its login (any
    email and password work).
-7. **Steep**: starts it through Steam or Ubisoft Connect, attaches the TLS helper to the game and waits
+6. **Steep**: starts it through Steam or Ubisoft Connect, attaches the TLS helper to the game and waits
    until it is online. Both versions start a short-lived starter process first; the helper attaches only
    to the real game from the chosen install. While the launcher stays open, the server keeps running, so
    Ubisoft Connect stays signed in and the next Play goes straight to the game.
+
+The game-data pack is set up apart from Play, in the **Game data** row under the buttons: **Choose
+pack…** installs a `.zip` into the local server's `gamedata/`, then a checkbox switches it on and off
+(remembered in `data/launcher/settings.json`; it applies at the next Play).
 
 Every Windows prompt is announced first: the launcher says why it is needed (the hosts file is a protected
 system file, so it needs admin rights; Windows asks to confirm a new certificate) and only continues when
