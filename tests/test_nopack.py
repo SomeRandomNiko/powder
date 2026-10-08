@@ -1,5 +1,6 @@
 """The server without a game-data pack: the replies it builds itself (powder/server/builtin/)."""
 import dataclasses
+import json
 
 import pytest
 from aiohttp.test_utils import TestClient, TestServer
@@ -93,3 +94,13 @@ def sdk_items_version():
 def test_sdk_services_are_unique():
     names = [g["name"] for g in sdk.gateway_resources()]
     assert len(names) == len(set(names)) == 56
+
+
+async def test_overlay_settings_without_ubisoft_parts_but_cache_first(client):
+    path = "/v4/spaces/global/ubiconnect/configcache/api/postauth?bundleEnv=prod&applications=a,b"
+    r = await client.get(path, headers={**UBI, "If-None-Match": '"x"'})
+    assert r.status == 304                                       # Connect's main window keeps its copy
+    r = await client.get(path, headers=UBI)
+    body = await r.json()
+    assert set(body) == {"a", "b"} and body["a"]["microApplications"] == []
+    assert "cdn.ubisoft.com" not in json.dumps(body)

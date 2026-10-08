@@ -4,7 +4,7 @@ from __future__ import annotations
 import json
 import re
 
-from . import sdk
+from . import connect_ui, sdk
 
 # Version of the space's item list (GET items/all?fields=lastModified,sha256,md5). The game compares it with
 # the list it ships with: when it matches, the game uses its own copy; otherwise it downloads the list and,
@@ -29,6 +29,9 @@ ROUTES = [
     ("GET", re.compile(r"/v4/spaces/[0-9a-fA-F-]{36}/configs/events"), lambda m, q: {"types": []}),
     # which items each owned DLC grants: none without a pack ({} makes the game log out)
     ("GET", re.compile(r"/v1/spaces/[0-9a-fA-F-]{36}/configs/primarystore"), lambda m, q: {"mappings": []}),
+    # Connect's in-game overlay settings, when the overlay has no cached copy (it never has)
+    ("GET", re.compile(r"/v4/spaces/global/ubiconnect/configcache/api/postauth"),
+     lambda m, q: connect_ui.postauth(q)),
 ]
 
 
