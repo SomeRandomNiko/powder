@@ -111,8 +111,23 @@ def test_launcher_asks_for_the_pack_and_installs_it(pack_dir, tmp_path):
     s = Scripted(LauncherConfig.load(tmp_path / "launcher.toml"), tmp_path / "data" / "launcher")
     s.steps = play_steps()
     assert s.check_pack() and s.step("pack").state == "ok"
-    assert s.asked == [("pack", ["Select game-data pack…", "Check again"])]
+    assert s.asked == [("pack", ["Select game-data pack…", "Play without it", "Check again"])]
     assert pack.check(tmp_path / "gamedata")
+
+
+def test_launcher_can_play_without_a_pack(tmp_path):
+    from powder.launcher.config import LauncherConfig
+    from powder.launcher.session import PLAY_WITHOUT_PACK, Session, play_steps
+    (tmp_path / "launcher.toml").write_text("")
+
+    class Scripted(Session):
+        def ask(self, key, text, actions, details=""):
+            return PLAY_WITHOUT_PACK
+
+    s = Scripted(LauncherConfig.load(tmp_path / "launcher.toml"), tmp_path / "data" / "launcher")
+    s.steps = play_steps()
+    assert s.check_pack() and s.step("pack").state == "ok" and "without" in s.step("pack").text
+    assert not (tmp_path / "gamedata").exists()
 
 
 # ---- ports ---------------------------------------------------------------------------------------

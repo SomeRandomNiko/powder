@@ -58,9 +58,11 @@ def play_steps() -> list[Step]:
             Step("game", "Steep")]
 
 
-PACK_WHY = ("Powder needs a game-data pack: Steep's store catalogue (which also defines challenge rewards) and "
-            "game configuration. It is Ubisoft's data, so it is not part of Powder; you get it separately as "
-            "a .zip file.")
+PACK_WHY = ("No game-data pack is installed. It holds Steep's store catalogue (which also defines challenge "
+            "rewards) and Ubisoft Connect's achievement and reward pages. It is Ubisoft's data, so it is not part "
+            "of Powder; you get it separately as a .zip file. Without it you can still play, but the store is "
+            "empty and challenges give no rewards.")
+PLAY_WITHOUT_PACK = "Play without it"
 
 
 def play_buttons(installs: list[locate.Install]) -> list[tuple[str, locate.Install | None]]:
@@ -233,7 +235,11 @@ class Session:
                 return True
             except pack.PackError as e:
                 problem = "" if not target.exists() else f" ({e})"
-            if self.ask("pack", PACK_WHY + problem, ["Select game-data pack…", "Check again"]) == "Check again":
+            choice = self.ask("pack", PACK_WHY + problem, ["Select game-data pack…", PLAY_WITHOUT_PACK, "Check again"])
+            if choice == PLAY_WITHOUT_PACK:
+                self.set("pack", OK, "no game-data pack: playing without store items and rewards")
+                return True
+            if choice == "Check again":
                 continue
             source = self.pick_file("Select the game-data pack (.zip)")
             if source is None:
