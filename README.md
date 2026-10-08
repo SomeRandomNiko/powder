@@ -47,7 +47,7 @@ What Steep needs a server for, and how far Powder covers it.
 | Challenge rewards (credits, items)               | ✅     |                                                                                                                                        |
 | Rider card and favorites                         | ✅     |                                                                                                                                        |
 | Personal best per challenge                      | ✅     | Stored on the server                                                                                                                   |
-| Achievements                                     | 🟡     | Stored and shown in Ubisoft Connect; a newly earned achievement not yet verified in-game                                               |
+| Achievements                                     | ✅     | Stored per player; shown in Ubisoft Connect's overlay and achievement view (names, icons, unlock dates)                                |
 | Taking over your progress from Ubisoft's servers | 🟡     | Only from recordings of your own online sessions, via the command line (`admin import`); players can't make such recordings themselves |
 
 ### Competing and sharing
@@ -148,7 +148,7 @@ A player who logs in for the first time starts like a new Ubisoft account: level
 `starting_credits`. To continue with your own progress, import it once from your recordings:
 
 ```
-uv run powder-server admin import <recordings>      # level, credits, items, stats, rider card
+uv run powder-server admin import <recordings>      # level, credits, items, stats, rider card, achievements
 uv run powder-server admin import <recordings> --replace
 ```
 
@@ -275,6 +275,7 @@ uv run powder-server admin offers armada          # search the store catalogue
 uv run powder-server admin events                 # recent progress uploads from the game
 uv run powder-server admin scores                 # personal best per challenge
 uv run powder-server admin entities               # rider card, favorites
+uv run powder-server admin achievements --all     # earned achievements (and the open ones)
 uv run powder-server admin import <recordings>    # your own recorded progress, once
 uv run powder-server admin reset                  # the player starts again as a new player
 uv run powder-server admin trust status           # the local CA in Windows (also install / remove)
