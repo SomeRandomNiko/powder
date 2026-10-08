@@ -1,4 +1,8 @@
-"""Ubisoft Connect's in-game overlay settings (configcache/api/postauth), without a pack.
+"""Ubisoft Connect's window and in-game overlay settings (configcache/api/postauth), without a pack.
+
+Connect's main window asks for the same settings: it gets "not modified" (304) while it holds a cached copy
+it can revalidate, and these otherwise, so without a pack it shows the Powder page too (decided with the
+user: no Ubisoft settings needed, and no dolphin-032 when Connect has no cache).
 
 The overlay (Shift+F2) is a frame (a "shell" from Ubisoft's CDN) that loads its parts ("micro apps":
 profile, friends, store...) from the addresses these settings list. Unlike Connect's main window, the
