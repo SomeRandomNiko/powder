@@ -31,6 +31,8 @@ ROUTES = [
     ("GET", re.compile(r"/v1/spaces/[0-9a-fA-F-]{36}/configs/primarystore"), lambda m, q: {"mappings": []}),
     ("GET", re.compile(rf"/v1/applications/{sdk.CONNECT_APP_ID}/parameters"),
      lambda m, q: connect_ui.client_parameters()),
+    ("GET", re.compile(r"/v1/spaces/[0-9a-fA-F-]{36}/global/ubiconnect/configcache/api/connecturls"),
+     lambda m, q: connect_ui.connect_urls()),
     ("GET", re.compile(r"/v1/spaces/global/ubiconnect/games/api"), lambda m, q: connect_ui.game_cards(q)),
     ("GET", re.compile(r"/v1/spaces/([0-9a-fA-F-]{36})/global/ubiconnect/games/api"),
      lambda m, q: connect_ui.game_card(m.group(1))),

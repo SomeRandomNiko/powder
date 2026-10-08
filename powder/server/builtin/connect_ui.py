@@ -100,6 +100,50 @@ def client_parameters() -> dict:
                                                      "relatedPopulation": None}}}
 
 
+UBI = "https://public-ubiservices.ubi.com"
+CONNECT_SPACE = "e17be87d-2996-4f3b-97c4-19bb2dae2933"
+CONNECT_APP = "f68a4bb5-608a-4ff2-8123-be8ef797e0a6"
+SHELL_SPACE, SHELL_APP = "0a706b37-4b88-4437-b8f4-4ed2458c9518", "20adeb9c-6dad-404e-af1e-b12b4594e86e"
+
+
+def connect_urls() -> dict:
+    """GET .../ubiconnect/configcache/api/connecturls from Connect itself (not its browser): where its
+    services and its window (shell) live. Hostnames and URL templates only. Without it, Connect waits 30 s
+    at every start before falling back to its cached copy."""
+    return {
+        "demuxUrl": "dmx.upc.ubisoft.com",
+        "shellUrl": ("https://{env}connect.cdn.ubisoft.com/overlay/default/bootstrap.html?env={environment}"
+                     "&isStandalone=true&platform={platform}&deviceType=desktop&locale={locale}"
+                     f"&spaceId={SHELL_SPACE}&applicationId={SHELL_APP}&ticket={{ubiTicket}}"
+                     "&sessionId={playerSessionId}&profileId={profileId}&country={country}&region={region}"
+                     "&ownershipGroup={ownershipGroup}&deviceId={deviceId}&deviceName={deviceName}"
+                     "&isOffline={isOffline}"),
+        "cdnBaseUrl": "https://static3.cdn.ubi.com",
+        "shellBaseUrl": "https://{env}connect.cdn.ubisoft.com",
+        "serviceLayerUrl": "https://servicelayer{env}.ecom.ubi.com",
+        "storeSessionsUrl": "https://store-sessions{env}.ecom.ubi.com",
+        "ubiServicesBaseUrl": "https://{env}public-ubiservices.ubi.com",
+        "ubiServicesWSSBaseUrl": "wss://{env}public-ws-ubiservices.ubi.com",
+        "ubiServicesNotificationBaseUrl": "https://{env}public-im-ubiservices.ubi.com",
+        "eventsUrl": f"{UBI}/v3/profiles/me/events",
+        "overlayUrl": OVERLAY_URL,
+        "profilesUrl": f"{UBI}/{{version}}/profiles",
+        "usersCreateUrl": f"{UBI}/{{version}}/users",
+        "configsEventsUrl": f"{UBI}/{{version}}/spaces/{{spaceId}}/configs/events",
+        "visitorEventsUrl": f"{UBI}/v5/spaces/{CONNECT_SPACE}/serviceEvents",
+        "metricsCollectorUrl": f"{UBI}/v1/spaces/all/global/sre/opentelemetry/api/metrics",
+        "profilesEntitiesUrl": f"{UBI}/{{version}}/profiles/{{profileId}}/entities",
+        "crashReportUploadUrl": "",
+        "allProfilesEntitiesUrl": f"{UBI}/{{version}}/profiles/entities",
+        "remoteLogsCollectorUrl": f"{UBI}/v1/spaces/all/global/sre/opentelemetry/api/logs",
+        "gameActivationSupportUrl": "",
+        "usersValidateCreationUrl": f"{UBI}/{{version}}/users/validatecreation",
+        "visitorMetricsCollectorUrl": f"{UBI}/v1/applications/{CONNECT_APP}/global/sre/opentelemetry/anon/metrics",
+        "steamGameActivationSupportUrl": "",
+        "visitorRemoteLogsCollectorUrl": f"{UBI}/v1/applications/{CONNECT_APP}/global/sre/opentelemetry/anon/logs",
+    }
+
+
 def game_card(space_id: str) -> dict | None:
     """Connect's card for Steep (GET .../ubiconnect/games/api): ids and name only, no texts or images.
     The overlay waits for it (about 4 s without one) before the game logs in."""
