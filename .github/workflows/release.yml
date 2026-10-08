@@ -31,7 +31,7 @@ jobs:
       tag: ${{ steps.next.outputs.tag }}
       version: ${{ steps.next.outputs.version }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           ref: ${{ inputs.ref }}
           fetch-depth: 0
@@ -67,17 +67,30 @@ jobs:
       TAG: ${{ needs.tag.outputs.tag }}
       VERSION: ${{ needs.tag.outputs.version }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           ref: refs/tags/${{ needs.tag.outputs.tag }}
 
-      - uses: astral-sh/setup-uv@v6
+      - uses: astral-sh/setup-uv@v10.2.0
         with:
           python-version: "3.12"
 
-      - uses: mlugg/setup-zig@v2
-        with:
-          version: 0.17.0
+      # zig from ziglang.org, pinned and checked against the checksum of its download index (there is
+      # no setup action on a current Node runtime)
+      - name: Install zig
+        shell: pwsh
+        env:
+          ZIG_URL: https://ziglang.org/download/0.17.0/zig-x86_64-windows-0.17.0.zip
+          ZIG_SHA256: b5663f69581dcf391293fbf16c06cb80d81d806545ce618b4d0bab7f0eb8c428
+        run: |
+          $zip = Join-Path $env:RUNNER_TEMP "zig.zip"
+          Invoke-WebRequest $env:ZIG_URL -OutFile $zip
+          $hash = (Get-FileHash $zip -Algorithm SHA256).Hash.ToLower()
+          if ($hash -ne $env:ZIG_SHA256) { throw "zig download checksum mismatch: $hash" }
+          Expand-Archive $zip -DestinationPath $env:RUNNER_TEMP
+          $dir = Get-ChildItem $env:RUNNER_TEMP -Directory -Filter "zig-x86_64-windows-*" | Select-Object -First 1
+          $dir.FullName | Out-File -FilePath $env:GITHUB_PATH -Append -Encoding utf8
+          & (Join-Path $dir.FullName "zig.exe") version
 
       - name: Install Inno Setup
         run: choco install innosetup -y --no-progress
@@ -88,7 +101,7 @@ jobs:
 
       # Signing goes here once there is a certificate (e.g. SignPath Foundation for open-source projects).
 
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: Powder-Setup-${{ needs.tag.outputs.tag }}
           path: dist/Powder-Setup-${{ needs.tag.outputs.tag }}.exe
