@@ -12,6 +12,17 @@ ROUTES = [
 ]
 
 
+# Ubisoft Connect's UI settings (which UI parts to load from Ubisoft's CDN, feature flags). Connect's
+# embedded browser caches them, and Ubisoft often answers "304 Not Modified" (the pack has no body for
+# those either). Without a pack: 304 when the browser has a copy, else an error. Never an empty 200: the
+# browser would cache it and the UI then fails on every start (dolphin-032) until Connect is online again.
+CONNECT_UI_SETTINGS = re.compile(r"/v\d+/spaces/[^/]+/(global/)?(ubiconnect/configcache/.*|parameters)")
+
+
+def keep_cached(path: str) -> bool:
+    return CONNECT_UI_SETTINGS.fullmatch(path) is not None
+
+
 def lookup(method: str, path: str):
     for want, pattern, build in ROUTES:
         m = pattern.fullmatch(path) if want == method else None

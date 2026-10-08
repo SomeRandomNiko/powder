@@ -120,6 +120,11 @@ async def fallback(request: web.Request) -> web.Response:
             request[HOW] = "builtin"
             return web.Response(body=json.dumps(built).encode(), headers={"Content-Type": routes_ubi.JSON})
         request[HOW] = "UNMATCHED"
+        if builtin_http.keep_cached(request.path):      # Connect's UI settings: never overwrite its cache
+            if request.headers.get("If-None-Match") or request.headers.get("If-Modified-Since"):
+                request[HOW] = "not-modified"
+                return web.Response(status=304)
+            return web.Response(status=503, body=b"{}", headers={"Content-Type": routes_ubi.JSON})
         return web.Response(body=b"{}", headers={"Content-Type": routes_ubi.JSON})
     fixture, tier = hit
     request[HOW] = f"gamedata:{tier}"

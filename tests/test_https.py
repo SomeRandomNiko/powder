@@ -6,7 +6,7 @@ import pytest
 from aiohttp.test_utils import TestClient, TestServer
 
 import synthetic as syn
-from powder.server.constants import CREDITS_ITEM, SPACE_ID
+from powder.server.constants import APP_ID, CREDITS_ITEM, SPACE_ID
 from powder.server.transport.https.app import build_app
 
 UBI = {"Host": syn.UBI}
@@ -117,6 +117,23 @@ async def test_pack_fallback_and_unmatched(client):
     assert r.status == 200 and await r.json() == {"recorded": True}
     r = await client.get("/v9/nothing/here", headers=UBI)
     assert r.status == 200 and await r.json() == {}
+
+
+async def test_connect_ui_settings_never_overwrite_the_browser_cache(client):
+    """Without a pack reply: 304 if Connect's browser has a copy, else an error (never an empty 200)."""
+    path = "/v4/spaces/global/ubiconnect/configcache/api/preauth?bundleEnv=prod"
+    r = await client.get(path, headers={**UBI, "If-None-Match": '"abc"'})
+    assert r.status == 304
+    r = await client.get(path, headers=UBI)
+    assert r.status == 503
+    r = await client.get("/v1/spaces/x/parameters?parameterGroups=ubiConnect-deeplinkConfig", headers=UBI)
+    assert r.status == 503
+
+
+async def test_builtin_sdk_configuration_for_the_game(client):
+    r = await client.get(f"/v1/applications/{APP_ID}/configuration", headers=UBI)
+    config = (await r.json())["configuration"]
+    assert config["platformConfig"]["applicationId"] == APP_ID and config["platformConfig"]["spaceId"] == SPACE_ID
 
 
 async def test_websocket_hello_and_server_push(client, services):
