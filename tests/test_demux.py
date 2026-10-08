@@ -174,3 +174,27 @@ async def test_session_over_tls(demux):
         assert pb.first(own2, 2) == 1
     finally:
         writer.close()
+
+
+async def test_patch_check_on_its_own_connection_gets_the_reported_version(demux):
+    """Connect asks for patch info on short connections of its own, without reporting its version there
+    (as in the real traffic); it must still hear its own version, not the recorded one."""
+    services, pki, port = demux
+    ctx = ssl.create_default_context(cafile=str(pki.ca_pem))
+
+    async def connect():
+        reader, writer = await asyncio.open_connection("127.0.0.1", port, ssl=ctx,
+                                                       server_hostname="dmx.upc.ubisoft.com")
+        return Client(reader, writer), writer
+
+    main, w1 = await connect()
+    check, w2 = await connect()
+    try:
+        await main.send([(2, [(4, [(1, 13380)])])])                     # main connection: version push
+        await main.request(1, 2, [(1, [(3, "any-ticket")]), (2, "uplay_pc")])   # round trip: push handled
+        patch = await check.request(0, 5, [(1, "174.0"), (2, 0)])      # patch query, no version
+        assert pb.first(patch, 5) == 13380
+        assert services.repos.kv.get("server", "connect_version") == 13380      # kept across restarts
+    finally:
+        w1.close()
+        w2.close()

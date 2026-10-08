@@ -91,16 +91,25 @@ class DemuxConnection:
             return
         await self.send([(1, [(1, rid), (num, reply)])])
 
+    def known_client_version(self) -> int:
+        """The Ubisoft Connect version of this client. Connect asks for patch info on short connections of
+        its own, without reporting its version there; it reports it on its main connection, so use what
+        this PC (IP) reported last, else what any Connect reported last (kept across restarts)."""
+        return (self.client_version or self.services.connect_versions.get(self.client_ip)
+                or int(self.services.repos.kv.get("server", "connect_version") or 0))
+
     def patch_info(self) -> bytes:
         """The latest Ubisoft Connect version is always the one this client runs: a version from the
         recording (field 5) makes a newer Connect try to patch itself to it, fetch a file list the server
         doesn't have, and give up (on some PCs closing when a game starts)."""
+        version = self.known_client_version()
+        log.info("demux %s: patch info: latest Ubisoft Connect is %s", self.peer, version or "as recorded")
         recorded = self.services.assets.products.patch_info
         if not recorded:
-            return pb.encode([(1, 1), (3, 0), (5, self.client_version), (6, 0), (7, 0)])
-        if not self.client_version:
+            return pb.encode([(1, 1), (3, 0), (5, version), (6, 0), (7, 0)])
+        if not version:
             return recorded
-        return pb.encode(pb.replace(pb.decode(recorded), 5, self.client_version))
+        return pb.encode(pb.replace(pb.decode(recorded), 5, version))
 
     def authenticate(self, body: list) -> bytes:
         token = pb.first(body, 1)
@@ -156,6 +165,9 @@ class DemuxConnection:
             elif num == 4:
                 self.client_version = pb.first(pb.decode(value), 1, 0)
                 log.info("demux %s: client version %s", self.peer, self.client_version)
+                if self.client_version:                  # for its patch checks on separate connections
+                    self.services.connect_versions[self.client_ip] = self.client_version
+                    self.services.repos.kv.set("server", "connect_version", self.client_version)
             elif num in (6, 7):
                 product = pb.first(pb.decode(value), 1)
                 what = "started" if num == 6 else "ended"
