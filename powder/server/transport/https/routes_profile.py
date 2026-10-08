@@ -61,10 +61,15 @@ async def graphql(request: web.Request) -> web.Response:
         batch = []
     for op in batch if isinstance(batch, list) else [batch]:
         if isinstance(op, dict):
+            name = op.get("operationName")
             query = " ".join(str(op.get("query", "")).split())
-            log.info("graphql %s vars=%s query=%s", op.get("operationName"),
-                     sorted((op.get("variables") or {}).keys()), query[:600])
+            log.info("graphql %s vars=%s query=%s", name, sorted((op.get("variables") or {}).keys()),
+                     query if name not in _logged_queries else "(as above)")
+            _logged_queries.add(name)
     return json_response(request, [{"data": {"games": []}}], "graphql")
+
+
+_logged_queries: set = set()                   # each operation's full query text is logged once
 
 
 # ---- game ---------------------------------------------------------------------------------------
