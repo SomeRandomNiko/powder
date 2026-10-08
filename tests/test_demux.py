@@ -241,3 +241,19 @@ def test_achievements_are_stored_and_returned(services, player):
 def test_reset_forgets_achievements(services, player):
     services.reset(player)
     assert services.repos.achievements.products(player) == {}
+
+
+def test_achievement_names_from_the_pack():
+    import io
+    import zipfile
+    from powder.server.fixtures.http import HttpFixture, HttpFixtures
+    from powder.server.services import Assets
+    buf = io.BytesIO()
+    with zipfile.ZipFile(buf, "w") as z:                 # made-up definitions in Connect's format
+        z.writestr("en-US_loc.txt", "﻿1\tFirst run\tDo something\n2\tSecond\tDo more\n")
+        z.writestr("1.png", b"png")
+    zip_entry = HttpFixture("GET", "static3.cdn.ubi.com", "/orbit/uplay_launcher_3_0/assets/abc.zip", 200,
+                            "application/zip", buf.getvalue())
+    assets = Assets(connect_http=HttpFixtures([zip_entry]))
+    assert assets.achievement_names() == {1: ("First run", "Do something"), 2: ("Second", "Do more")}
+    assert assets.achievement_names("xx-XX") == {} and Assets().achievement_names() == {}

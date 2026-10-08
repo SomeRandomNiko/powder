@@ -8,7 +8,7 @@
   powder-server admin events [PLAYER] [-n N]        stat uploads from the game (XP, medals, unlocks)
   powder-server admin scores [PLAYER]               personal best per challenge
   powder-server admin entities [PLAYER]             profile entities (rider card, favorites)
-  powder-server admin achievements [PLAYER]         earned achievements
+  powder-server admin achievements [PLAYER] [--all] earned achievements (--all: also the open ones)
   powder-server admin import RECORDINGS_DIR [--replace]   your own recorded progress -> database (once)
   powder-server admin reset [PLAYER]                start over as a new player
   powder-server admin offers TEXT
@@ -56,6 +56,7 @@ def add_parser(sub) -> None:
     q.add_argument("player", nargs="?")
     q = a.add_parser("achievements", help="earned achievements (as Ubisoft Connect reported them)")
     q.add_argument("player", nargs="?")
+    q.add_argument("--all", action="store_true", help="also list the ones not earned yet")
     q = a.add_parser("import", help="import your own recorded progress into the database (once)")
     q.add_argument("recordings", type=Path)
     q.add_argument("--replace", action="store_true", help="overwrite that player if it exists")
@@ -138,10 +139,20 @@ def run(args, config: Config) -> int:
         for e in s.repos.challenge_scores.all(pid):
             print(f"{e['challenge_id']:48s} {e['best_score']:>12g}  ({e['direction']}, {e['updated']})")
     elif cmd == "achievements":
-        for product, n in s.repos.achievements.products(pid).items():
-            print(f"{product}: {n} earned")
-            for ach_id, ts in s.repos.achievements.all(pid, product).items():
-                print(f"  {ach_id:4d}  {datetime.datetime.fromtimestamp(ts, datetime.UTC):%Y-%m-%d %H:%M} UTC")
+        names = s.assets.achievement_names()            # Steep's, from the game-data pack
+        products = s.repos.achievements.products(pid) or {"STP:PC": 0}
+        for product, n in products.items():
+            earned = s.repos.achievements.all(pid, product)
+            steep = product == "STP:PC" and names
+            print(f"{product}: {n} earned" + (f" of {len(names)}" if steep else ""))
+            for ach_id, ts in earned.items():
+                name = f"  {names[ach_id][0]}" if steep and ach_id in names else ""
+                print(f"  {ach_id:4d}  {datetime.datetime.fromtimestamp(ts, datetime.UTC):%Y-%m-%d %H:%M} UTC{name}")
+            if steep and args.all:
+                print("  not yet earned:")
+                for ach_id, (name, text) in names.items():
+                    if ach_id not in earned:
+                        print(f"  {ach_id:4d}  {name} - {text}")
     elif cmd == "entities":
         for e in s.entities.for_profile(pid, limit=1000):
             print(f"{e['entityId']}  {e['type']:20s} rev {e['revision']:<4} {e['lastModified']}  "
