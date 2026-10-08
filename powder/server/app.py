@@ -34,10 +34,7 @@ async def run(config: Config) -> None:
     services = Services.open(config)
     log.info("data: %s (schema v%d)", config.data_dir, services.db.version())
     a = services.assets
-    if a.empty:
-        log.warning("no game-data pack at %s: the store is empty and game configs are missing "
-                    "(build one: powder-server gamedata build <recordings> %s)", config.gamedata_dir, config.gamedata_dir)
-    else:
+    if not a.empty:                                     # without one, Assets.load said so (built-in replies)
         log.info("game data: %s (built %s: %d offers, %d game replies, %d Ubisoft Connect replies, %d products)",
                  config.gamedata_dir, a.manifest.get("built"), len(a.catalog), len(a.http.entries),
                  len(a.connect_http.entries), len(a.products.products))

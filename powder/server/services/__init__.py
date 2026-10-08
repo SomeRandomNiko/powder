@@ -58,7 +58,8 @@ class Assets:
     @classmethod
     def load(cls, root: Path) -> "Assets":
         if not (root / "MANIFEST.json").exists():          # optional: no store catalogue, no Connect pages
-            log.info("no game-data pack at %s: running without (empty store, no rewards)", root)
+            log.info("no game-data pack at %s: built-in replies (empty store, no challenge rewards, "
+                     "no achievement names in Ubisoft Connect)", root)
             return cls()
         try:
             manifest = pack.read_manifest(root)

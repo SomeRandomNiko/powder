@@ -33,8 +33,8 @@ What Steep needs a server for, and how far Powder covers it.
 | ----------------------------------------------- | ------ | ------------------------------------------------------------------------------------------- |
 | Ubisoft Connect sign-in                         | ✅     | Any email/password; Connect stays signed in to the server                                   |
 | Game login (Steam and Ubisoft Connect versions) | ✅     | Both versions of the final update (TU7)                                                     |
-| Owned games / DLC ownership                     | ✅     | Steep and its add-ons from the game-data pack                                               |
-| Game configuration, season info                 | ✅     | Static, from the game-data pack                                                             |
+| Owned games / DLC ownership                     | ✅     | Steep and its add-ons, built in                                                             |
+| Game configuration, season info                 | ✅     | Built in (the game-data pack's copy is used when installed)                                 |
 | Several players on one server                   | 🟡     | Possible by mapping IP addresses to players (`[players.bind]`); no real player accounts yet |
 
 ### Progression and economy
@@ -43,11 +43,11 @@ What Steep needs a server for, and how far Powder covers it.
 | ------------------------------------------------ | ------ | -------------------------------------------------------------------------------------------------------------------------------------- |
 | Level and XP per sport, playtime                 | ✅     | From the game's stat uploads; never goes down                                                                                          |
 | Medals, dropzones, memorables, unlocks           | ✅     |                                                                                                                                        |
-| Store: buying items with credits                 | ✅     | Full catalogue from the game-data pack                                                                                                 |
-| Challenge rewards (credits, items)               | ✅     |                                                                                                                                        |
+| Store: buying items with credits                 | ✅     | Needs the game-data pack (the catalogue); without it the store is empty                                                                |
+| Challenge rewards (credits, items)               | ✅     | Needs the game-data pack (rewards are store offers)                                                                                    |
 | Rider card and favorites                         | ✅     |                                                                                                                                        |
 | Personal best per challenge                      | ✅     | Stored on the server                                                                                                                   |
-| Achievements                                     | ✅     | Stored per player; shown in Ubisoft Connect's overlay and achievement view (names, icons, unlock dates)                                |
+| Achievements                                     | ✅     | Stored per player; names and icons in Ubisoft Connect need the game-data pack                                                          |
 | Taking over your progress from Ubisoft's servers | 🟡     | Only from recordings of your own online sessions, via the command line (`admin import`); players can't make such recordings themselves |
 
 ### Competing and sharing
@@ -57,7 +57,7 @@ What Steep needs a server for, and how far Powder covers it.
 | Leaderboards (challenge rankings) | ❌     | Always empty; the scores are already stored, the rankings are not built yet |
 | Replays / ghosts of other players | ❌     | Uploads and downloads of replays are not stored or served                   |
 | Player-made trails / challenges   | ❌     | Always an empty list                                                        |
-| Seasons and tournaments           | 🟡     | The recorded season is shown; nothing time-limited or changing              |
+| Seasons and tournaments           | 🟡     | No season running, as on Ubisoft's servers at the end; nothing changes      |
 
 ### Playing with others
 
@@ -79,14 +79,15 @@ What Steep needs a server for, and how far Powder covers it.
 
 ## Install
 
-You need Windows 10/11 with Ubisoft Connect, Steep's final update (TU7) from Steam or Ubisoft Connect, and
-a game-data pack (`.zip`, see below).
+You need Windows 10/11 with Ubisoft Connect, Steep's final update (TU7) from Steam or Ubisoft Connect.
+A game-data pack (`.zip`, see below) is optional: it adds the store and challenge rewards.
 
 1. Download `Powder-Setup-vX.Y.Z.exe` from the [Releases](../../releases) page and run it. It installs for
    your Windows user only (no admin rights). While Powder is not code-signed, Windows SmartScreen warns
    about an unknown app: **More info → Run anyway**.
-2. Start **Powder** and press **Play**. The first time, it asks for the game-data pack, then walks you
-   through what it needs to set up (every Windows prompt is explained before it appears).
+2. Start **Powder** and press **Play**. The first time, it asks for a game-data pack (**Play without it**
+   is fine), then walks you through what it needs to set up (every Windows prompt is explained before it
+   appears).
 
 Powder keeps your progress, the game-data pack and its settings in `%LOCALAPPDATA%\Powder`, apart from
 the program, so updating (install the new version over the old one) never touches them. Uninstalling
@@ -103,7 +104,7 @@ the TLS helper. Files go to the current folder instead of `%LOCALAPPDATA%\Powder
 
 ```
 native\build.ps1                                    # once: builds the TLS helper
-uv run powder-server gamedata build <recordings> gamedata   # once: the game-data pack (see below)
+uv run powder-server gamedata build <recordings> gamedata   # optional: the game-data pack (see below)
 uv run powder                                       # the launcher: press Play
 ```
 
@@ -118,10 +119,13 @@ uv run pytest
 
 ## Game-data pack
 
-Some of what the game asks for is Ubisoft's game data, not code: the store catalogue (2,000+ offers,
-which also define challenge rewards), game configuration, season info, Ubisoft Club actions and Steep's
-product entries for Ubisoft Connect. That data is not in this repository. It comes as a separate pack in
-`gamedata/`, built from recordings of your own online sessions:
+Powder runs without one: the server builds what the game and Ubisoft Connect need to go online
+(`powder/server/builtin/`: Steep's owned-games entries, the SDK configuration, the game's start replies;
+only ids, hostnames, URL templates and values written for Powder). What it cannot build is Ubisoft's
+game data: the store catalogue (2,000+ offers, which also define challenge rewards), Ubisoft Club actions,
+the achievement names and icons Connect shows, and which items each DLC grants. That data is not in this
+repository. It comes as an optional pack in `gamedata/`, built from recordings of your own online
+sessions; when installed, its replies take precedence over the built-in ones:
 
 ```
 uv run powder-server gamedata build <recordings> gamedata    # allow-list + privacy check
@@ -131,8 +135,12 @@ uv run powder-server gamedata verify                         # manifest + file h
 The builder copies only allow-listed, game-wide replies. Before writing the pack it collects every
 identifying value from the recordings (account and profile ids, names, email, tickets, friends, other
 players) and refuses to write the pack if any of them appears in it. Everything personal (profile,
-friends, login, owned games beyond Steep) is generated by the server instead of replayed. Without a pack
-the server still starts, but the game cannot load the store or its configuration.
+friends, login, owned games beyond Steep) is generated by the server instead of replayed.
+
+Ubisoft Connect's own interface comes from Ubisoft's CDN and keeps its settings in a browser cache, which
+the server never overwrites (it answers "not modified"). If Connect has never been online on a PC, or its
+cache was cleared, it fails with dolphin-032 until it has been started once normally (without Powder:
+**Restore system**, sign in to your real account, then Play again).
 
 The pack travels as one `.zip`: the launcher asks for it when it is missing (checking format and file
 hashes before using it), and the same works from a console:
@@ -166,7 +174,8 @@ these steps; each step only checks unless something is missing:
 
 1. **Game files**: finds the chosen Steep, Ubisoft Connect (and Steam for the Steam version), and checks
    that `Steep.exe` is a build the TLS helper supports.
-2. **Game data**: the local server's game-data pack; if it is missing, it asks for the `.zip`.
+2. **Game data**: the local server's game-data pack; if it is missing, it offers to install the `.zip`
+   or to play without it.
 3. **Server**: reaches it, or starts it locally (`server_mode = "local"`, the default) after checking that
    its ports are free (if not, it names the program using them). With `server_mode = "remote"` and
    `server_address` it uses a server on another PC instead, and warns if that server's major version

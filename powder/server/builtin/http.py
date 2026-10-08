@@ -1,23 +1,22 @@
 """HTTPS replies the server builds itself when no game-data pack answers (see builtin/__init__.py)."""
 from __future__ import annotations
 
-import hashlib
 import json
 import re
 
 from . import sdk
 
-# The space's item list. With ?fields=lastModified,sha256,md5 the game asks for its version, and downloads
-# the list itself when the hashes differ from its cached copy; both answers must agree ({} for the
-# version made the game log out again right after its NEX login).
-ITEMS = json.dumps({"items": []}).encode()
-ITEMS_VERSION = {"lastModified": "2016-12-01T00:00:00.000Z",
-                 "sha256": hashlib.sha256(ITEMS).hexdigest().upper(),
-                 "md5": hashlib.md5(ITEMS).hexdigest().upper()}
+# Version of the space's item list (GET items/all?fields=lastModified,sha256,md5). The game compares it with
+# the list it ships with: when it matches, the game uses its own copy; otherwise it downloads the list and,
+# with anything else than Ubisoft's list, logs out again right after going online (as with {}). These are
+# the fingerprint of that shipped list (no list content); the full list is never needed.
+ITEMS_VERSION = {"lastModified": "2025-03-24T15:53:59.194Z",
+                 "sha256": "F8F0FBB89CC430475115C1B54243D3B3779C29032C7F00EA670DD4E078C85A2C",
+                 "md5": "AAA894E0E01921DF01C683B64B10DF87"}
 
 
-def items_all(m, query) -> dict | bytes:
-    return ITEMS_VERSION if "fields" in query else ITEMS
+def items_all(m, query) -> dict | None:
+    return ITEMS_VERSION if "fields" in query else None
 
 
 # (method, path regex) -> fn(match, query) -> JSON-able reply or exact bytes (None: not ours after all)
@@ -28,6 +27,8 @@ ROUTES = [
     ("GET", re.compile(r"/v2/spaces/global/ubiconnect/challenges/api/legacy/empty"), lambda m, q: []),
     # event types the server wants reported: none needed (the game still sends its events)
     ("GET", re.compile(r"/v4/spaces/[0-9a-fA-F-]{36}/configs/events"), lambda m, q: {"types": []}),
+    # which items each owned DLC grants: none without a pack ({} makes the game log out)
+    ("GET", re.compile(r"/v1/spaces/[0-9a-fA-F-]{36}/configs/primarystore"), lambda m, q: {"mappings": []}),
 ]
 
 
