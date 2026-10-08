@@ -73,7 +73,11 @@ int main(int argc, char **argv) {
     g_addr = (LONG64)(base + TARGET_RVA);
     printf("armer: pid %lu target 0x%llx, arming\n", pid, (unsigned long long)g_addr); fflush(stdout);
 
-    for (int i = 1; i < NTHREADS; i++) CreateThread(NULL, 0, spin, NULL, 0, NULL);
+    HANDLE threads[NTHREADS - 1]; int nthreads = 0;
+    for (int i = 1; i < NTHREADS; i++) {
+        HANDLE t = CreateThread(NULL, 0, spin, NULL, 0, NULL);
+        if (t) threads[nthreads++] = t;
+    }
     DWORD old; void *addr = (void *)(uintptr_t)g_addr; unsigned c = 0;
     for (;;) {
         VirtualProtectEx(g_proc, addr, 0x1000, PAGE_EXECUTE_READ | PAGE_GUARD, &old);
@@ -82,7 +86,11 @@ int main(int argc, char **argv) {
             if (!alive()) { g_stop = 1; printf("armer: game exited\n"); return 2; }
         }
     }
-    g_stop = 1; Sleep(30);
+    // stop re-arming and wait until every re-arming thread has really finished: one that was paused
+    // could otherwise put the guard back after it is taken off below
+    g_stop = 1;
+    if (nthreads) WaitForMultipleObjects((DWORD)nthreads, threads, TRUE, INFINITE);
+    for (int i = 0; i < nthreads; i++) CloseHandle(threads[i]);
     VirtualProtectEx(g_proc, addr, 0x1000, PAGE_EXECUTE_READ, &old);          // guard off
     static const unsigned char patch[6] = {0xB8, 0x01, 0x00, 0x00, 0x00, 0xC3};  // mov eax,1 ; ret
     DWORD oldp;

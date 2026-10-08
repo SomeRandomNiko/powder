@@ -236,6 +236,11 @@ class ProcessObserver:
 CONNECT_PARENTS = {"ubisoftgamelauncher.exe", "ubisoftgamelauncher64.exe"}
 
 
+def started_by_connect(pid: int) -> bool:
+    """The game itself (started by Ubisoft Connect's game launcher), not a starter process."""
+    return any(p.pid == pid and p.parent_name.lower() in CONNECT_PARENTS for p in game_processes())
+
+
 def real_game_pid(min_threads: int = 20, exe_dir: Path | None = None) -> int | None:
     """The real game, not Steam's starter: the Steep.exe started by Ubisoft Connect. Fallback if no
     parent matches (e.g. Connect renamed its processes): the Steep.exe with the most threads.

@@ -429,8 +429,40 @@ def test_no_attach_when_the_code_never_appears(tmp_path, monkeypatch):
     monkeypatch.setattr(attach, "load_dll", lambda pid: loaded.append(pid) or True)
     s = Session(LauncherConfig(), tmp_path)
     s.steps = session_mod.play_steps()
-    assert s.attach_and_watch(5, observer=None) is False
+    assert s.attach_and_watch(5, observer=None) == session_mod.OFFLINE
     assert loaded == [] and s.step("game").state == "failed"         # never risks crashing the game
+
+
+def test_a_crash_of_the_real_game_is_reported_not_taken_for_a_starter(tmp_path, monkeypatch):
+    from powder.launcher import attach, server
+    import powder.launcher.session as session_mod
+    procs = [attach.GameProcess(301, 40, 9, "UbisoftGameLauncher.exe")]           # the real game
+    found = iter([301])
+    calls = {"n": 0}
+
+    def game_processes():
+        calls["n"] += 1
+        if calls["n"] == 3:                     # it starts its crash reporter, then both are gone
+            procs.append(attach.GameProcess(302, 0, 301, "steep.exe"))
+        if calls["n"] >= 5:
+            procs.clear()
+        return list(procs)
+
+    monkeypatch.setattr(session_mod.os, "startfile", lambda url: None, raising=False)
+    monkeypatch.setattr(attach, "wait_for_real_game", lambda *a, **k: next(found))
+    monkeypatch.setattr(attach, "wait_unpacked", lambda *a, **k: attach.READY)
+    monkeypatch.setattr(attach, "load_dll", lambda pid: True)
+    monkeypatch.setattr(attach, "log_has", lambda text: True)
+    monkeypatch.setattr(attach, "start_armer", lambda pid: None)
+    monkeypatch.setattr(attach, "game_processes", game_processes)
+    monkeypatch.setattr(server, "status", lambda *a, **k: {"game": []})
+    s = Session(LauncherConfig(), tmp_path)
+    s.wait = lambda seconds: None
+    s.install = locate.Install(locate.CONNECT, tmp_path / "Steep.exe", 3279)
+    s.steps = session_mod.play_steps()
+    assert s.run_game()
+    step = s.step("game")
+    assert step.state == "failed" and "crashed" in step.text and "starter" not in step.text
 
 
 def test_patch_spot_hash_matches_the_unpacked_steam_build():

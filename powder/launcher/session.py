@@ -28,6 +28,8 @@ from .config import LauncherConfig
 log = logging.getLogger("powder.launcher")
 
 PENDING, RUNNING, OK, ACTION, FAILED = "pending", "running", "ok", "action", "failed"
+# how a game process ended (attach_and_watch)
+ONLINE, OFFLINE, STARTER, CRASHED, CLOSED_EARLY = "online", "offline", "starter", "crashed", "closed early"
 
 # Rule: every Windows prompt (UAC, certificate dialogs) is announced first with why it is needed, and only
 # appears after the user presses a button for it.
@@ -345,6 +347,7 @@ class Session:
         os.startfile(launch_url(inst, self.cfg.steam_app_id))
         observer = attach.ProcessObserver(log)
         timeout = 180
+        result = OFFLINE
         for _ in range(3):              # a process that exits right away was a starter: wait for the next one
             pid = attach.wait_for_real_game(timeout, stop=self.cancel.is_set, observer=observer,
                                             exe_dir=inst.exe.parent)
@@ -352,37 +355,52 @@ class Session:
                 self.set("game", FAILED, "Steep did not start")
                 return False
             started = time.monotonic()
-            online = self.attach_and_watch(pid, observer)
-            if online is not None:
+            result = self.attach_and_watch(pid, observer)
+            if result != STARTER:
                 break
             log.info("game pid %d exited after %.1f s without going online: waiting for the next one",
                      pid, time.monotonic() - started)
             self.set("game", RUNNING, "that was a starter process; waiting for the game itself")
             timeout = 60
-        else:
-            online = False
-        self.set("game", OK if online else FAILED,
-                 "game closed - press Play to start it again" if online else
-                 "game closed before going online - press Play to try again")
+        if result == ONLINE:
+            self.set("game", OK, "game closed - press Play to start it again")
+        elif result in (CRASHED, CLOSED_EARLY):
+            log.warning("game %s while starting", "crashed" if result == CRASHED else "closed")
+            self.set("game", FAILED, "Steep closed while it was starting" + (
+                " - it crashed (Windows started its crash report)" if result == CRASHED else "") +
+                ". Press Play to try again; if it keeps happening, Open logs shows more.")
+        elif self.step("game").state != FAILED:
+            self.set("game", FAILED, "game closed before going online - press Play to try again")
         return True
 
-    def attach_and_watch(self, pid: int, observer) -> bool | None:
-        """Attach the helper to `pid` and wait until it exits. True/False: whether it went online; None:
-        it exited within 30 s without going online (a starter process, not the game)."""
+    def attach_and_watch(self, pid: int, observer) -> str:
+        """Attach the helper to `pid` and wait until it exits: ONLINE / OFFLINE (it ran, never went online),
+        STARTER (a process that exits within seconds and wasn't started as the game: wait for the next),
+        CRASHED / CLOSED_EARLY (the real game, started by Ubisoft Connect, ended within 30 s; CRASHED when
+        it started a child process - Windows' crash report - before)."""
         started = time.monotonic()
+        real = attach.started_by_connect(pid)
+        children: set[int] = set()
+
+        def early_end() -> str:
+            if not real:
+                return STARTER
+            log.info("game pid %d (started by Ubisoft Connect) ended after %.1f s; child processes: %s",
+                     pid, time.monotonic() - started, sorted(children) or "none")
+            return CRASHED if children else CLOSED_EARLY
         # the protector unpacks the game code first (seconds on a hard disk): attaching earlier crashes it
         self.set("game", RUNNING, f"waiting for Steep to finish loading (pid {pid})")
         state = attach.wait_unpacked(pid, game.TARGET_RVA, game.PATCH_SPOT_LEN, game.PATCH_SPOT_SHA256,
                                      timeout=60, stop=self.cancel.is_set, log=log.info)
         log.info("game pid %d code %s after %.1f s", pid, state, time.monotonic() - started)
         if state == attach.GONE:
-            return None                                  # exited while loading: a starter
+            return early_end()                           # ended while loading
         if state != attach.READY:
             if self.cancel.is_set():
                 raise Cancelled
             self.set("game", FAILED, "Steep's code did not finish loading as expected within a minute; the TLS "
                                      "helper was not attached (it could crash the game). See the logs.")
-            return False
+            return OFFLINE
         self.set("game", RUNNING, f"attaching the TLS helper (pid {pid})")
         for attempt in range(20):                        # right after start-up it may not be ready yet
             if attach.load_dll(pid):
@@ -390,9 +408,9 @@ class Session:
             self.wait(0.5)
         else:
             if pid not in {p.pid for p in attach.game_processes()}:
-                return None                              # gone already: a starter
+                return early_end()
             self.set("game", FAILED, "could not load the TLS helper into the game")
-            return False
+            return OFFLINE
         for _ in range(100):
             if attach.log_has("attach"):
                 break
@@ -400,7 +418,11 @@ class Session:
         self.armer = attach.start_armer(pid)
         self.set("game", RUNNING, "press any key at the title screen; waiting for the game to go online")
         online = False
-        while pid in {p.pid for p in attach.game_processes()}:
+        while True:
+            procs = attach.game_processes()
+            if pid not in {p.pid for p in procs}:
+                break
+            children |= {p.pid for p in procs if p.parent_pid == pid}
             observer.poll()
             st = server.status(self.cfg)
             if not online and st and st.get("game"):
@@ -409,9 +431,9 @@ class Session:
             self.wait(1 if time.monotonic() - started < 30 else 2)
         observer.poll()
         self.end_game()
-        if not online and time.monotonic() - started < 30:
-            return None
-        return online
+        if online:
+            return ONLINE
+        return early_end() if time.monotonic() - started < 30 else OFFLINE
 
     # ---- restore system ----------------------------------------------------------------------------
     def restore_game(self) -> bool:
