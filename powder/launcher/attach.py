@@ -9,6 +9,7 @@ from __future__ import annotations
 import ctypes
 import hashlib
 import subprocess
+import threading
 import time
 from ctypes import wintypes
 from dataclasses import dataclass
@@ -288,10 +289,21 @@ def log_has(text: str) -> bool:
         return False
 
 
-def start_armer(pid: int) -> subprocess.Popen:
-    return subprocess.Popen([str(ARMER), "--pid", str(pid), "--log", str(LOG)],
-                            stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True,
+def start_armer(pid: int, log=None) -> subprocess.Popen:
+    """Run armer.exe for `pid`; its output ('arming', 'patch ok' / 'patch FAILED', exit) goes to `log`."""
+    proc = subprocess.Popen([str(ARMER), "--pid", str(pid), "--log", str(LOG)],
+                            stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, errors="replace",
                             creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
+
+    def relay():
+        for line in proc.stdout:
+            if log and line.strip():
+                log(line.strip())
+        code = proc.wait()
+        if log:
+            log(f"armer: exited with code {code} (0 patched, 2 game exited first, 1 error)")
+    threading.Thread(target=relay, daemon=True).start()
+    return proc
 
 
 def ready() -> str | None:

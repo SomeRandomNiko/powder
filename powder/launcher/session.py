@@ -415,7 +415,7 @@ class Session:
             if attach.log_has("attach"):
                 break
             self.wait(0.1)
-        self.armer = attach.start_armer(pid)
+        self.armer = attach.start_armer(pid, log=log.info)
         self.set("game", RUNNING, "press any key at the title screen; waiting for the game to go online")
         online = False
         while True:
