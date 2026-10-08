@@ -29,6 +29,8 @@ ROUTES = [
     ("GET", re.compile(r"/v4/spaces/[0-9a-fA-F-]{36}/configs/events"), lambda m, q: {"types": []}),
     # which items each owned DLC grants: none without a pack ({} makes the game log out)
     ("GET", re.compile(r"/v1/spaces/[0-9a-fA-F-]{36}/configs/primarystore"), lambda m, q: {"mappings": []}),
+    ("GET", re.compile(rf"/v1/applications/{sdk.CONNECT_APP_ID}/parameters"),
+     lambda m, q: connect_ui.client_parameters()),
     # Connect's in-game overlay settings, when the overlay has no cached copy (it never has)
     ("GET", re.compile(r"/v4/spaces/global/ubiconnect/configcache/api/postauth"),
      lambda m, q: connect_ui.postauth(q)),

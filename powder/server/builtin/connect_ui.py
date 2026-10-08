@@ -35,6 +35,20 @@ def application_settings() -> dict:
     }
 
 
+# Where the overlay frame lives ({shellBaseUrl} is Connect's CDN address it knows itself)
+OVERLAY_URL = ("{shellBaseUrl}/overlay/default/?microApp={microApp}&microAppParams={microAppParams}&spaceId={spaceId}"
+               "&applicationId={applicationId}&profileId={profileId}&platform={platform}&locale={locale}"
+               "&ubiTicket={ubiTicket}&env={environment}&deviceType=desktop&playerSessionId={playerSessionId}"
+               "&country={country}")
+
+
+def client_parameters() -> dict:
+    """GET /v1/applications/{Connect's app id}/parameters: Connect's client settings. Only the overlay's
+    address (without it the overlay fails with dolphin-029); account-security settings are left out."""
+    return {"parameters": {"uplayPc-clientConfigs": {"fields": {"ubisoftConnectOverlayUrlV2": OVERLAY_URL},
+                                                     "relatedPopulation": None}}}
+
+
 def postauth(query) -> dict | None:
     """{application id: settings} for the applications asked for (`applications=` a comma list)."""
     apps = [a for a in query.get("applications", "").split(",") if a]
