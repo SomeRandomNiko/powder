@@ -370,6 +370,19 @@ class Session:
         """Attach the helper to `pid` and wait until it exits. True/False: whether it went online; None:
         it exited within 30 s without going online (a starter process, not the game)."""
         started = time.monotonic()
+        # the protector unpacks the game code first (seconds on a hard disk): attaching earlier crashes it
+        self.set("game", RUNNING, f"waiting for Steep to finish loading (pid {pid})")
+        state = attach.wait_unpacked(pid, game.TARGET_RVA, game.PATCH_SPOT_LEN, game.PATCH_SPOT_SHA256,
+                                     timeout=60, stop=self.cancel.is_set, log=log.info)
+        log.info("game pid %d code %s after %.1f s", pid, state, time.monotonic() - started)
+        if state == attach.GONE:
+            return None                                  # exited while loading: a starter
+        if state != attach.READY:
+            if self.cancel.is_set():
+                raise Cancelled
+            self.set("game", FAILED, "Steep's code did not finish loading as expected within a minute; the TLS "
+                                     "helper was not attached (it could crash the game). See the logs.")
+            return False
         self.set("game", RUNNING, f"attaching the TLS helper (pid {pid})")
         for attempt in range(20):                        # right after start-up it may not be ready yet
             if attach.load_dll(pid):

@@ -1,7 +1,7 @@
-"""Where Powder's files are, from a repo checkout (dev) or from the installed program (frozen build).
+r"""Where Powder's files are, from a repo checkout (dev) or from the installed program (frozen build).
 
   user_root()    settings and everything Powder generates: config.toml, launcher.toml, data\, gamedata\
-                 installed: %LOCALAPPDATA%\\Powder (kept apart from the program, so updates and the
+                 installed: %LOCALAPPDATA%\Powder (kept apart from the program, so updates and the
                  uninstaller never touch progress unless asked); dev: the current folder
   native_dir()   the TLS helper (hook_guard.dll, armer.exe)
   self_command() how Powder starts itself for the server and the elevated hosts-file step. The installed

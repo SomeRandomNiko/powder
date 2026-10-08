@@ -15,6 +15,15 @@ SUPPORTED = {
 }
 
 
+# Where the TLS helper sets its trap (ssl_verify_cert_chain; also in native/*.c), and what the first
+# PATCH_SPOT_LEN bytes there hash to once the protector has unpacked the game code (the same in both
+# builds). The launcher attaches the helper only after that: during unpacking the protector still writes
+# into that page, and the helper's read-only trap would crash it (seen with Steep on a hard disk).
+TARGET_RVA = 0x1D3E290
+PATCH_SPOT_LEN = 64
+PATCH_SPOT_SHA256 = "710263eff728e572e93557ae30b9b125415ed61657273c967ae8822b66c0e8e9"
+
+
 def file_sha256(path: Path) -> str:
     h = hashlib.sha256()
     with open(path, "rb") as f:

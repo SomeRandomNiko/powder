@@ -7,6 +7,7 @@ wait until the DLL reports "attach" in its log, then run armer.exe for that pid.
 from __future__ import annotations
 
 import ctypes
+import hashlib
 import subprocess
 import time
 from ctypes import wintypes
@@ -55,6 +56,89 @@ class GameProcess:
     threads: int
     parent_pid: int = 0
     parent_name: str = ""
+
+
+# ---- is the game code unpacked yet? (read-only: query + read access) ----------------------------------
+PROCESS_QUERY_READ = 0x0400 | 0x0010                           # QUERY_INFORMATION | VM_READ
+PAGE_WRITABLE = 0x04 | 0x08 | 0x40 | 0x80                       # (EXECUTE_)READWRITE, (EXECUTE_)WRITECOPY
+PAGE_NOACCESS_OR_GUARD = 0x01 | 0x100
+READY, GONE, TIMEOUT = "ready", "gone", "timeout"
+
+
+class MEMORY_BASIC_INFORMATION(ctypes.Structure):
+    _fields_ = [("BaseAddress", ctypes.c_void_p), ("AllocationBase", ctypes.c_void_p),
+                ("AllocationProtect", wintypes.DWORD), ("PartitionId", wintypes.WORD),
+                ("RegionSize", ctypes.c_size_t), ("State", wintypes.DWORD), ("Protect", wintypes.DWORD),
+                ("Type", wintypes.DWORD)]
+
+
+def _reader():
+    k = _k32()
+    k.ReadProcessMemory.argtypes = [wintypes.HANDLE, ctypes.c_void_p, ctypes.c_void_p, ctypes.c_size_t,
+                                    ctypes.POINTER(ctypes.c_size_t)]
+    k.VirtualQueryEx.argtypes = [wintypes.HANDLE, ctypes.c_void_p, ctypes.POINTER(MEMORY_BASIC_INFORMATION),
+                                 ctypes.c_size_t]
+    k.VirtualQueryEx.restype = ctypes.c_size_t
+    psapi = ctypes.WinDLL("psapi", use_last_error=True)
+    psapi.EnumProcessModulesEx.argtypes = [wintypes.HANDLE, ctypes.POINTER(ctypes.c_void_p), wintypes.DWORD,
+                                           ctypes.POINTER(wintypes.DWORD), wintypes.DWORD]
+    return k, psapi
+
+
+def code_state(pid: int, rva: int, length: int) -> tuple[int, bytes] | None:
+    """(page protection, first `length` bytes at image base + rva) of the running game; None if the process
+    is gone or not readable yet."""
+    k, psapi = _reader()
+    h = k.OpenProcess(PROCESS_QUERY_READ, False, pid)
+    if not h:
+        return None
+    try:
+        mods = (ctypes.c_void_p * 1)()
+        needed = wintypes.DWORD()
+        if not psapi.EnumProcessModulesEx(h, mods, ctypes.sizeof(mods), ctypes.byref(needed), 3) or not mods[0]:
+            return None
+        addr = mods[0] + rva
+        mbi = MEMORY_BASIC_INFORMATION()
+        if not k.VirtualQueryEx(h, addr, ctypes.byref(mbi), ctypes.sizeof(mbi)):
+            return None
+        buf = ctypes.create_string_buffer(length)
+        got = ctypes.c_size_t()
+        if mbi.Protect & PAGE_NOACCESS_OR_GUARD or not k.ReadProcessMemory(h, addr, buf, length, ctypes.byref(got)):
+            return mbi.Protect, b""
+        return mbi.Protect, buf.raw[:got.value]
+    finally:
+        k.CloseHandle(h)
+
+
+def unpacked(state: tuple[int, bytes] | None, length: int, sha256: str) -> bool:
+    """The protector is done with the trap's page: no longer writable, and the code there is the known one."""
+    if state is None:
+        return False
+    protect, data = state
+    return not protect & PAGE_WRITABLE and len(data) == length and hashlib.sha256(data).hexdigest() == sha256
+
+
+def wait_unpacked(pid: int, rva: int, length: int, sha256: str, timeout: float,
+                  stop=lambda: False, poll: float = 0.05, log=None) -> str:
+    """READY once the game code at the trap is unpacked, GONE if the process exits first, else TIMEOUT.
+    `log` gets each change of (page protection, code known) while waiting."""
+    start = time.monotonic()
+    deadline = start + timeout
+    seen = None
+    while time.monotonic() < deadline and not stop():
+        if pid not in {p.pid for p in game_processes()}:
+            return GONE
+        state = code_state(pid, rva, length)
+        now = (state[0] if state else None,
+               bool(state and state[1] and hashlib.sha256(state[1]).hexdigest() == sha256))
+        if log and now != seen:
+            log("pid %d after %.2f s: page protection %s, code %s", pid, time.monotonic() - start,
+                hex(now[0]) if now[0] is not None else "unreadable", "known" if now[1] else "not yet")
+            seen = now
+        if unpacked(state, length, sha256):
+            return READY
+        time.sleep(poll)
+    return TIMEOUT
 
 
 def _snapshot() -> list[tuple[int, int, int, str]]:

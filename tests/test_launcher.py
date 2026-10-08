@@ -373,6 +373,7 @@ def test_run_game_skips_a_starter_that_exits(tmp_path, monkeypatch):
 
     monkeypatch.setattr(session_mod.os, "startfile", lambda url: None, raising=False)
     monkeypatch.setattr(attach, "wait_for_real_game", wait_for_real_game)
+    monkeypatch.setattr(attach, "wait_unpacked", lambda pid, *a, **k: attach.READY)
     monkeypatch.setattr(attach, "load_dll", load_dll)
     monkeypatch.setattr(attach, "log_has", lambda text: True)
     monkeypatch.setattr(attach, "start_armer", lambda pid: None)
@@ -384,3 +385,63 @@ def test_run_game_skips_a_starter_that_exits(tmp_path, monkeypatch):
     s.steps = session_mod.play_steps()
     assert s.run_game()
     assert attached == [101, 202] and s.step("game").state == "ok"
+
+
+# ---- attach only once the game code is unpacked -------------------------------------------------------
+def test_unpacked_needs_final_protection_and_known_code():
+    import hashlib
+    from powder.launcher import attach
+    code = b"\x48\x89\x5c\x24" * 16
+    want = hashlib.sha256(code).hexdigest()
+    PAGE_EXECUTE_READ, PAGE_EXECUTE_READWRITE, PAGE_READWRITE = 0x20, 0x40, 0x04
+    assert attach.unpacked((PAGE_EXECUTE_READ, code), 64, want)
+    assert not attach.unpacked((PAGE_EXECUTE_READWRITE, code), 64, want)   # protector still writing
+    assert not attach.unpacked((PAGE_READWRITE, code), 64, want)
+    assert not attach.unpacked((PAGE_EXECUTE_READ, b"\x00" * 64), 64, want)  # not unpacked yet
+    assert not attach.unpacked((PAGE_EXECUTE_READ, b""), 64, want)          # unreadable
+    assert not attach.unpacked(None, 64, want)
+
+
+def test_wait_unpacked_follows_the_protector(monkeypatch):
+    import hashlib
+    from powder.launcher import attach
+    code = bytes(range(64))
+    want = hashlib.sha256(code).hexdigest()
+    states = iter([None, (0x04, b""), (0x40, code), (0x20, code)])     # unreadable, writing, written, done
+    monkeypatch.setattr(attach, "game_processes", lambda: [attach.GameProcess(7, 40)])
+    monkeypatch.setattr(attach, "code_state", lambda pid, rva, n: next(states))
+    lines = []
+    assert attach.wait_unpacked(7, 0x1000, 64, want, timeout=5, poll=0,
+                                log=lambda *a: lines.append(a[0] % a[1:])) == attach.READY
+    assert len(lines) == 4 and "0x20, code known" in lines[-1]
+    monkeypatch.setattr(attach, "game_processes", lambda: [])
+    assert attach.wait_unpacked(7, 0x1000, 64, want, timeout=5, poll=0) == attach.GONE
+    monkeypatch.setattr(attach, "game_processes", lambda: [attach.GameProcess(7, 40)])
+    monkeypatch.setattr(attach, "code_state", lambda pid, rva, n: (0x40, b""))
+    assert attach.wait_unpacked(7, 0x1000, 64, want, timeout=0.05, poll=0.01) == attach.TIMEOUT
+
+
+def test_no_attach_when_the_code_never_appears(tmp_path, monkeypatch):
+    from powder.launcher import attach
+    import powder.launcher.session as session_mod
+    loaded = []
+    monkeypatch.setattr(attach, "wait_unpacked", lambda *a, **k: attach.TIMEOUT)
+    monkeypatch.setattr(attach, "load_dll", lambda pid: loaded.append(pid) or True)
+    s = Session(LauncherConfig(), tmp_path)
+    s.steps = session_mod.play_steps()
+    assert s.attach_and_watch(5, observer=None) is False
+    assert loaded == [] and s.step("game").state == "failed"         # never risks crashing the game
+
+
+def test_patch_spot_hash_matches_the_unpacked_steam_build():
+    """Only where the unpacked dump exists (it stays outside the repository)."""
+    import hashlib
+    from pathlib import Path
+    import pytest
+    from powder.launcher import game
+    dump = Path(r"C:\dev\steep-re\bin\Steep_unpacked.exe")
+    if not dump.exists():
+        pytest.skip("no unpacked Steep.exe dump on this machine")
+    with open(dump, "rb") as f:
+        f.seek(game.TARGET_RVA)
+        assert hashlib.sha256(f.read(game.PATCH_SPOT_LEN)).hexdigest() == game.PATCH_SPOT_SHA256
