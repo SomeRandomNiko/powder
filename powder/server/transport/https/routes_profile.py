@@ -4,6 +4,7 @@ lists for friends, news and other people's content; neutral values for account d
 """
 from __future__ import annotations
 
+import logging
 import uuid
 
 from aiohttp import web
@@ -12,6 +13,8 @@ from ...constants import SPACE_ID
 from ...util import iso_now
 from .keys import HOW, SERVICES, SESSION
 from .routes_ubi import json_response
+
+log = logging.getLogger("powder.https")
 
 
 def _services(request: web.Request):
@@ -47,6 +50,21 @@ def _ok(payload, how):
     async def handler(request: web.Request) -> web.Response:
         return json_response(request, payload() if callable(payload) else payload, how)
     return handler
+
+
+async def graphql(request: web.Request) -> web.Response:
+    """Ubisoft Connect's UI queries (library, game pages, achievements) go to one GraphQL endpoint.
+    Answered with no games for now; the operations are logged to learn which ones the UI needs."""
+    try:
+        batch = await request.json()
+    except ValueError:
+        batch = []
+    for op in batch if isinstance(batch, list) else [batch]:
+        if isinstance(op, dict):
+            query = " ".join(str(op.get("query", "")).split())
+            log.info("graphql %s vars=%s query=%s", op.get("operationName"),
+                     sorted((op.get("variables") or {}).keys()), query[:600])
+    return json_response(request, [{"data": {"games": []}}], "graphql")
 
 
 # ---- game ---------------------------------------------------------------------------------------
@@ -207,7 +225,7 @@ def add_routes(app: web.Application) -> None:
     r.add_get(f"/v1/profiles/{pid}/connections", _ok({"connections": []}, "connections"))
     r.add_get(f"/v1/profiles/{pid}/avatars", _ok({"type": "default", "imageVariations": []}, "avatars"))
     r.add_get("/v1/profiles/me/gamesplayed", _ok({"gamesPlayed": []}, "games-played"))
-    r.add_post("/v1/profiles/me/uplay/graphql", _ok([{"data": {"games": []}}], "graphql"))
+    r.add_post("/v1/profiles/me/uplay/graphql", graphql)
     r.add_get(f"/v1/profiles/{pid}/gamerecommendations", _ok({"gameRecommendations": []}, "recommendations"))
     r.add_get(f"/v1/profiles/{pid}/statsCard", _ok({"Statscards": []}, "stats-card"))
     r.add_get(f"/v2/profiles/{pid}/news", _ok({"pagination": {"total": 0, "count": 0, "offset": 0, "limit": 20},
