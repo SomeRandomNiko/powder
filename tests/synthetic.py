@@ -89,6 +89,23 @@ def _achievements_reply() -> bytes:
     return pb.encode([(1, 2), (3, [(1, PLAYER), (2, [(1, [(1, [(1, "STP"), (2, "PC")]), (2, entries)])])])])
 
 
+ACHIEVEMENT_NAMES = {1: ("First steps", "Do the first thing"), 4: ("Four", "Do a fourth thing"),
+                     15: ("Fifteen", "Do it fifteen times"), 30: ("Thirty", "Not earned yet")}
+ICON = b"\x89PNG\r\n\x1a\nmade-up"
+
+
+def _achievement_zip() -> bytes:
+    """Made-up achievement definitions in Ubisoft Connect's format (texts per language + icons)."""
+    import io
+    import zipfile
+    buf = io.BytesIO()
+    with zipfile.ZipFile(buf, "w") as z:
+        z.writestr("en-US_loc.txt", "﻿" + "".join(f"{i}\t{n}\t{d}\n" for i, (n, d) in ACHIEVEMENT_NAMES.items()))
+        for i in ACHIEVEMENT_NAMES:
+            z.writestr(f"{i}.png", ICON)
+    return buf.getvalue()
+
+
 def _http(method, host, path, body, status=200):
     raw = json.dumps(body).encode()
     return {"method": method, "host": host, "path": path, "status": status,
@@ -125,6 +142,9 @@ def build(folder: Path) -> Path:
         _http("GET", UBI, "/v3/users/me", {"userId": PLAYER, "nameOnPlatform": PLAYER_NAME,
                                            "email": PLAYER_EMAIL}),
         _http("GET", UBI, f"/v1/spaces/{SPACE_ID}/parameters?parameterGroups=x", {"parameters": {"a": 1}}),
+        {"method": "GET", "host": "static3.cdn.ubi.com", "path": "/orbit/uplay_launcher_3_0/assets/0123abcd.zip",
+         "status": 200, "content_type": "application/zip",
+         "body_b64": base64.b64encode(_achievement_zip()).decode()},
     ]
     (folder / "connect-fixtures.json").write_text(json.dumps(connect))
     demux = {"client_version": 13368,

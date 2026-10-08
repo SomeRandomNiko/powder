@@ -78,24 +78,31 @@ class Assets:
     def empty(self) -> bool:
         return self.manifest is None
 
-    def achievement_names(self, lang: str = "en-US") -> dict[int, tuple[str, str]]:
-        """{achievement id: (name, description)} from Ubisoft Connect's achievement definitions in the
-        pack (a zip with one '<lang>_loc.txt' of 'id<TAB>name<TAB>description' lines per language)."""
+    def _achievement_file(self, name: str) -> bytes | None:
+        """A file from Ubisoft Connect's achievement definitions in the pack (a zip with '<lang>_loc.txt'
+        files of 'id<TAB>name<TAB>description' lines and '<id>.png' icons)."""
         for e in self.connect_http.entries:
             if not (e.path.split("?")[0].endswith(".zip") and "/assets/" in e.path):
                 continue
             try:
                 with zipfile.ZipFile(io.BytesIO(e.body)) as z:
-                    text = z.read(f"{lang}_loc.txt").decode("utf-8-sig")
+                    return z.read(name)
             except (zipfile.BadZipFile, KeyError):
                 continue
-            names = {}
-            for line in text.splitlines():
-                parts = line.split("\t")
-                if len(parts) >= 3 and parts[0].isdigit():
-                    names[int(parts[0])] = (parts[1], parts[2])
-            return names
-        return {}
+        return None
+
+    def achievement_names(self, lang: str = "en-US") -> dict[int, tuple[str, str]]:
+        """{achievement id: (name, description)} of Steep's achievements, from the pack."""
+        raw = self._achievement_file(f"{lang}_loc.txt")
+        names = {}
+        for line in raw.decode("utf-8-sig").splitlines() if raw else []:
+            parts = line.split("\t")
+            if len(parts) >= 3 and parts[0].isdigit():
+                names[int(parts[0])] = (parts[1], parts[2])
+        return names
+
+    def achievement_icon(self, achievement_id: int) -> bytes | None:
+        return self._achievement_file(f"{int(achievement_id)}.png")
 
 
 @dataclass

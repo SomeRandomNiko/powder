@@ -146,3 +146,29 @@ async def test_personal_endpoints_are_generated_not_replayed(client):
     looked_up = await (await client.get(f"/v3/profiles?profileIds={syn.PLAYER},{syn.FRIEND}", headers=UBI)).json()
     assert [p["profileId"] for p in looked_up["profiles"]] == [syn.PLAYER]     # only players we know
     assert (await (await client.get("/ugc/v1/?algo=Steep", headers={"Host": "steep-prod-pc.steep.olympus.ubi.com"})).json()) == []
+
+
+async def test_connect_achievement_view(client, services):
+    """Ubisoft Connect's UI asks for achievements over GraphQL (batched): titles, icons and the player's
+    unlocks come from the pack and the database."""
+    ticket = (await login(client))["ticket"]
+    auth = {**UBI, "Authorization": f"Ubi_v1 t={ticket}"}
+    batch = [{"operationName": "GetAchievementsCount", "variables": {"spaceId": SPACE_ID, "productId": 3279}},
+             {"operationName": "GetAchievements", "variables": {"spaceId": SPACE_ID, "productId": 3279}},
+             {"operationName": "GetFriends", "variables": {"spaceId": SPACE_ID}}]
+    r = await client.post("/v1/profiles/me/uplay/graphql", headers=auth, json=batch)
+    count, full, other = await r.json()
+    assert count["data"]["game"]["viewer"]["meta"]["achievements"]["totalCount"] == len(syn.ACHIEVEMENT_NAMES)
+    ach = full["data"]["game"]["viewer"]["meta"]["achievements"]
+    assert ach["totalCount"] == 4 and ach["completedCount"] == 3              # 1, 4, 15 imported; 30 open
+    by_id = {n["achievementId"]: n for n in ach["nodes"]}
+    assert by_id[1]["title"] == "First steps" and by_id[1]["viewer"]["meta"]["isCompleted"]
+    assert by_id[1]["viewer"]["meta"]["completionDate"] == "2017-07-14T02:40:00.000Z"
+    assert not by_id[30]["viewer"]["meta"]["isCompleted"] and by_id[30]["viewer"]["meta"]["completionDate"] is None
+    assert other == {"data": {"games": []}}                                   # one result per operation
+    icon = await client.get(by_id[1]["icon"].split(syn.UBI, 1)[1], headers=UBI)
+    assert icon.status == 200 and await icon.read() == syn.ICON
+    # another game: nothing; a single (unbatched) operation gets a single result
+    r = await client.post("/v1/profiles/me/uplay/graphql", headers=auth, json={
+        "operationName": "GetAchievements", "variables": {"spaceId": "00000000-0000-0000-0000-000000000000"}})
+    assert (await r.json())["data"]["game"]["viewer"]["meta"]["achievements"]["nodes"] == []

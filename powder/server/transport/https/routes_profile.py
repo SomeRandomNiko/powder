@@ -4,6 +4,7 @@ lists for friends, news and other people's content; neutral values for account d
 """
 from __future__ import annotations
 
+import datetime
 import logging
 import uuid
 
@@ -53,23 +54,88 @@ def _ok(payload, how):
 
 
 async def graphql(request: web.Request) -> web.Response:
-    """Ubisoft Connect's UI queries (library, game pages, achievements) go to one GraphQL endpoint.
-    Answered with no games for now; the operations are logged to learn which ones the UI needs."""
+    """Ubisoft Connect's UI queries (library, game pages, achievements) go to one GraphQL endpoint, as a
+    batch: one result per operation, in order. Achievement queries are answered from the database and
+    the pack; the others with no games (as before). Each operation's full query is logged once."""
     try:
         batch = await request.json()
     except ValueError:
         batch = []
-    for op in batch if isinstance(batch, list) else [batch]:
-        if isinstance(op, dict):
-            name = op.get("operationName")
-            query = " ".join(str(op.get("query", "")).split())
-            log.info("graphql %s vars=%s query=%s", name, sorted((op.get("variables") or {}).keys()),
-                     query if name not in _logged_queries else "(as above)")
-            _logged_queries.add(name)
-    return json_response(request, [{"data": {"games": []}}], "graphql")
+    ops = batch if isinstance(batch, list) else [batch]
+    results = []
+    for op in ops:
+        op = op if isinstance(op, dict) else {}
+        name = op.get("operationName")
+        query = " ".join(str(op.get("query", "")).split())
+        log.info("graphql %s vars=%s query=%s", name, sorted((op.get("variables") or {}).keys()),
+                 query if name not in _logged_queries else "(as above)")
+        _logged_queries.add(name)
+        answer = GRAPHQL_ANSWERS.get(name)
+        results.append(answer(request, op.get("variables") or {}) if answer else {"data": {"games": []}})
+    return json_response(request, results if isinstance(batch, list) else results[0], "graphql")
 
 
 _logged_queries: set = set()                   # each operation's full query text is logged once
+STEEP_ACHIEVEMENTS = "STP:PC"                  # the product key Connect uses for Steep's achievements
+
+
+def _achievement_game(request: web.Request, variables: dict, connection: dict) -> dict:
+    """{data: {game: {id, viewer: {meta: {id, achievements: connection}}}}} for Steep's space."""
+    space = variables.get("spaceId") or ""
+    me = _me(request) or ""
+    return {"data": {"game": {
+        "id": space, "__typename": "Game",
+        "viewer": {"__typename": "GameUserEdge", "meta": {
+            "id": f"{me}-{space}", "__typename": "UserGameMeta",
+            "achievements": {**connection, "__typename": "AchievementConnection"}}}}}}
+
+
+def _achievements(request: web.Request, variables: dict) -> tuple[dict, dict]:
+    """(names, earned) of the player's achievements in this game; empty for games other than Steep."""
+    if (variables.get("spaceId") or "").lower() != SPACE_ID:
+        return {}, {}
+    services, me = _services(request), _me(request)
+    earned = services.repos.achievements.all(me, STEEP_ACHIEVEMENTS) if me else {}
+    return services.assets.achievement_names(), earned
+
+
+def gql_achievements_count(request: web.Request, variables: dict) -> dict:
+    names, _ = _achievements(request, variables)
+    return _achievement_game(request, variables, {"totalCount": len(names)})
+
+
+def gql_achievements(request: web.Request, variables: dict) -> dict:
+    """Every achievement with its title, description, icon (served by this server) and whether and when
+    the player earned it."""
+    names, earned = _achievements(request, variables)
+    space, me = variables.get("spaceId") or "", _me(request) or ""
+    host = request.headers.get("Host") or request.host
+    nodes = []
+    for ach_id, (title, description) in names.items():
+        ts = earned.get(ach_id)
+        nodes.append({
+            "id": f"{space}-{ach_id}", "achievementId": ach_id, "title": title, "description": description,
+            "icon": f"https://{host}/_powder/achievements/{ach_id}.png", "__typename": "Achievement",
+            "viewer": {"__typename": "AchievementUserEdge", "meta": {
+                "id": f"{me}-{space}-{ach_id}", "__typename": "UserAchievementMeta", "isCompleted": ts is not None,
+                "completionDate": datetime.datetime.fromtimestamp(ts, datetime.UTC).strftime(
+                    "%Y-%m-%dT%H:%M:%S.000Z") if ts is not None else None}}})
+    return _achievement_game(request, variables, {
+        "totalCount": len(nodes), "completedCount": sum(1 for n in nodes if n["viewer"]["meta"]["isCompleted"]),
+        "nodes": nodes})
+
+
+GRAPHQL_ANSWERS = {"GetAchievementsCount": gql_achievements_count, "GetAchievements": gql_achievements}
+
+
+async def achievement_icon(request: web.Request) -> web.Response:
+    """GET /_powder/achievements/{id}.png: an achievement's icon from the pack."""
+    raw = request.match_info["ach_id"]
+    icon = _services(request).assets.achievement_icon(int(raw)) if raw.isdigit() else None
+    if icon is None:
+        raise web.HTTPNotFound()
+    request[HOW] = "achievement-icon"
+    return web.Response(body=icon, content_type="image/png", headers={"Cache-Control": "max-age=86400"})
 
 
 # ---- game ---------------------------------------------------------------------------------------
@@ -231,6 +297,7 @@ def add_routes(app: web.Application) -> None:
     r.add_get(f"/v1/profiles/{pid}/avatars", _ok({"type": "default", "imageVariations": []}, "avatars"))
     r.add_get("/v1/profiles/me/gamesplayed", _ok({"gamesPlayed": []}, "games-played"))
     r.add_post("/v1/profiles/me/uplay/graphql", graphql)
+    r.add_get("/_powder/achievements/{ach_id}.png", achievement_icon)
     r.add_get(f"/v1/profiles/{pid}/gamerecommendations", _ok({"gameRecommendations": []}, "recommendations"))
     r.add_get(f"/v1/profiles/{pid}/statsCard", _ok({"Statscards": []}, "stats-card"))
     r.add_get(f"/v2/profiles/{pid}/news", _ok({"pagination": {"total": 0, "count": 0, "offset": 0, "limit": 20},
