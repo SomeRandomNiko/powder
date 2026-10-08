@@ -144,6 +144,15 @@ def connect_urls() -> dict:
     }
 
 
+def native_parameters(groups: str) -> dict:
+    """GET /v1/spaces/{id}/parameters?parameterGroups=... from Connect itself (no cached copy; with an error
+    it waits 30 s at start). Empty groups, except the address of Connect's window."""
+    out = {}
+    if "connect-clientConfigs" in groups.split(","):
+        out["connect-clientConfigs"] = {"fields": {"shellUrl": connect_urls()["shellUrl"]}, "relatedPopulation": None}
+    return {"parameters": out}
+
+
 def game_card(space_id: str) -> dict | None:
     """Connect's card for Steep (GET .../ubiconnect/games/api): ids and name only, no texts or images.
     The overlay waits for it (about 4 s without one) before the game logs in."""

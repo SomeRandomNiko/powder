@@ -36,9 +36,10 @@ ROUTES = [
     ("GET", re.compile(r"/v1/spaces/global/ubiconnect/games/api"), lambda m, q: connect_ui.game_cards(q)),
     ("GET", re.compile(r"/v1/spaces/([0-9a-fA-F-]{36})/global/ubiconnect/games/api"),
      lambda m, q: connect_ui.game_card(m.group(1))),
-    # the overlay's bot-protection settings: none (it waits on an error)
+    # parameters asked without a cached copy (Connect itself, the overlay): empty groups, as Connect waits on
+    # an error; a browser with a cached copy got 304 before this (see keep_cached)
     ("GET", re.compile(r"/v1/spaces/[0-9a-fA-F-]{36}/parameters"),
-     lambda m, q: {"parameters": {}} if q.get("parameterGroups") == "ubiConnect-dataDomeConfig" else None),
+     lambda m, q: connect_ui.native_parameters(q.get("parameterGroups", ""))),
     # Connect's in-game overlay settings, when the overlay has no cached copy (it never has)
     ("GET", re.compile(r"/v4/spaces/global/ubiconnect/configcache/api/postauth"),
      lambda m, q: connect_ui.postauth(q)),
