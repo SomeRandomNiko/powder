@@ -95,6 +95,7 @@ class Session:
         self.server_proc: server.ServerProcess | None = None
         self.armer = None
         self.hosts_added = False
+        self.pack_changed = False                       # pack installed/removed since our server started
         self.thread: threading.Thread | None = None
         self.paths: dict[str, Path] = {}
         self.installs: list[locate.Install] = self.detect()   # which Steep versions are installed
@@ -250,7 +251,18 @@ class Session:
             pack.install(source, self.server_config().gamedata_dir)
         except pack.PackError as e:
             return str(e)
+        self.pack_changed = True                         # a running server still holds the old one
         self.set_pack_enabled(True)
+        return None
+
+    def remove_pack(self) -> str | None:
+        """Delete the local server's pack; an error text if it can't be."""
+        try:
+            pack.remove(self.server_config().gamedata_dir)
+        except (pack.PackError, OSError) as e:
+            return str(e)
+        self.pack_changed = True
+        log.info("game-data pack removed")
         return None
 
     def set_pack_enabled(self, enabled: bool) -> None:
@@ -270,12 +282,12 @@ class Session:
         self.set("server", RUNNING, f"reaching {self.cfg.server_address}")
         st = server.status(self.cfg)
         if st is not None and self.server_proc and self.server_proc.running() \
-                and bool(st.get("gamedata")) != self.wanted_pack():
-            self.set("server", RUNNING, "restarting the local server (game-data pack switched "
-                                        f"{'on' if self.wanted_pack() else 'off'})")
+                and (self.pack_changed or bool(st.get("gamedata")) != self.wanted_pack()):
+            self.set("server", RUNNING, "restarting the local server (game-data pack changed)")
             self.server_proc.stop()
             self.server_proc = None
             st = None
+        self.pack_changed = False
         if st is None and self.cfg.server_mode == "local":
             srv = self.server_config().server
             needed = [ports.Port(srv.https_port, "TCP", "HTTPS"), ports.Port(srv.crl_port, "TCP", "certificate list"),

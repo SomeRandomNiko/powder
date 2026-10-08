@@ -72,6 +72,8 @@ class LauncherWindow:
             self.use_pack.set(info.enabled)
             ttk.Checkbutton(self.pack_bar, text=f"Use the game-data pack (built {info.built})",
                             variable=self.use_pack, command=self.toggle_pack).pack(side="left")
+            ttk.Button(self.pack_bar, text="Replace…", command=self.choose_pack).pack(side="left", padx=(8, 0))
+            ttk.Button(self.pack_bar, text="Remove", command=self.remove_pack).pack(side="left", padx=(4, 0))
             note = "store and challenge rewards on" if info.enabled else "off: empty store, no challenge rewards"
         else:
             ttk.Button(self.pack_bar, text="Choose pack…", command=self.choose_pack).pack(side="left")
@@ -87,6 +89,15 @@ class LauncherWindow:
             error = self.session.install_pack(Path(name))
             if error:
                 messagebox.showerror("Game-data pack", f"{Path(name).name} can't be used: {error}")
+        self.render_pack()
+
+    def remove_pack(self) -> None:
+        if not messagebox.askyesno("Game-data pack", "Delete the installed game-data pack from this PC?\n\n"
+                                   "Your progress is not affected; you can choose a pack again later."):
+            return
+        error = self.session.remove_pack()
+        if error:
+            messagebox.showerror("Game-data pack", f"The pack could not be removed: {error}")
         self.render_pack()
 
     def toggle_pack(self) -> None:

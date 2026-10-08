@@ -124,6 +124,15 @@ def install(source: Path, target: Path) -> dict:
         shutil.rmtree(staging, ignore_errors=True)
 
 
+def remove(target: Path) -> None:
+    """Delete an installed pack. Only a folder that is a pack (has MANIFEST.json) is deleted."""
+    if not target.exists():
+        return
+    if not (target / "MANIFEST.json").is_file():
+        raise PackError(f"{target} does not look like a game-data pack (no MANIFEST.json); not deleted")
+    shutil.rmtree(target)
+
+
 @dataclass
 class ConnectProducts:
     """Steep's entries in Ubisoft Connect's owned-games reply."""

@@ -111,6 +111,22 @@ def test_launcher_pack_is_chosen_once_and_switched_on_and_off(pack_dir, tmp_path
     s.set_pack_enabled(False)
     again = Session(cfg, data)                                            # remembered
     assert again.pack_info().installed and not again.pack_info().enabled and not again.wanted_pack()
+    assert again.install_pack(z) is None and again.pack_info().enabled    # replace: on again
+    assert again.pack_changed                                             # our server restarts at Play
+    assert again.remove_pack() is None and not again.pack_info().installed
+    assert not (tmp_path / "gamedata").exists()
+
+
+def test_pack_remove_only_deletes_a_pack(tmp_path):
+    import pytest
+
+    from powder.server.gamedata import pack
+    other = tmp_path / "gamedata"
+    (other / "keep").mkdir(parents=True)
+    with pytest.raises(pack.PackError):
+        pack.remove(other)
+    assert (other / "keep").exists()
+    pack.remove(tmp_path / "missing")                                     # nothing to do
 
 
 def test_launcher_pack_is_the_servers_business_in_remote_mode(tmp_path):

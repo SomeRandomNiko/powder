@@ -194,8 +194,9 @@ these steps; each step only checks unless something is missing:
    Ubisoft Connect stays signed in and the next Play goes straight to the game.
 
 The game-data pack is set up apart from Play, in the **Game data** row under the buttons: **Choose
-pack…** installs a `.zip` into the local server's `gamedata/`, then a checkbox switches it on and off
-(remembered in `data/launcher/settings.json`; it applies at the next Play).
+pack…** installs a `.zip` into the local server's `gamedata/`. Then a checkbox switches it on and off
+(remembered in `data/launcher/settings.json`), **Replace…** installs another one and **Remove** deletes
+it; changes apply at the next Play.
 
 Every Windows prompt is announced first: the launcher says why it is needed (the hosts file is a protected
 system file, so it needs admin rights; Windows asks to confirm a new certificate) and only continues when
