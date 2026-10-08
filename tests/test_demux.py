@@ -135,9 +135,9 @@ async def test_session_over_tls(demux):
                                                    server_hostname="dmx.upc.ubisoft.com")
     c = Client(reader, writer)
     try:
-        await c.send([(2, [(4, [(1, 13368)])])])                       # client version push
+        await c.send([(2, [(4, [(1, 13380)])])])                       # client newer than the recording
         patch = await c.request(1, 5, [(1, 0)])
-        assert pb.first(patch, 5) == 13368
+        assert pb.first(patch, 5) == 13380 and pb.first(patch, 1) == 1   # "up to date", rest as recorded
         utility = await c.request(0, 6, [(1, "utility_service"), (2, b"")])
         geo = pb.decode(pb.first(pb.decode(pb.first(pb.decode(pb.first(utility, 2)), 1)), 1))
         assert pb.text(geo, 1) == services.config.server.country      # from config, not a recording

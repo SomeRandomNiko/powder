@@ -83,14 +83,24 @@ class DemuxConnection:
         elif num == 3:
             reply = self.open_connection(pb.text(body or [], 2))
         elif num == 5:                                  # patch info: "your client is up to date"
-            reply = self.services.assets.products.patch_info or pb.encode(
-                [(1, 1), (3, 0), (5, self.client_version), (6, 0), (7, 0)])
+            reply = self.patch_info()
         elif num == 6:
             reply = self.service_request(pb.text(body or [], 1), pb.first(body or [], 2, b""))
         else:
             log.warning("DEMUX UNHANDLED request kind %d from %s", num, self.peer)
             return
         await self.send([(1, [(1, rid), (num, reply)])])
+
+    def patch_info(self) -> bytes:
+        """The latest Ubisoft Connect version is always the one this client runs: a version from the
+        recording (field 5) makes a newer Connect try to patch itself to it, fetch a file list the server
+        doesn't have, and give up (on some PCs closing when a game starts)."""
+        recorded = self.services.assets.products.patch_info
+        if not recorded:
+            return pb.encode([(1, 1), (3, 0), (5, self.client_version), (6, 0), (7, 0)])
+        if not self.client_version:
+            return recorded
+        return pb.encode(pb.replace(pb.decode(recorded), 5, self.client_version))
 
     def authenticate(self, body: list) -> bytes:
         token = pb.first(body, 1)
