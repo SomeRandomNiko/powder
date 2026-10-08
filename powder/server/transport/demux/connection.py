@@ -25,6 +25,7 @@ from .services import ServiceContext, answer
 log = logging.getLogger("powder.demux")
 
 MAX_MESSAGE = 16 << 20
+PATCH_BASE_URL = "https://static3.cdn.ubi.com/orbit/releases/0/patches/"   # never fetched: no newer version
 
 
 class DemuxConnection:
@@ -105,8 +106,9 @@ class DemuxConnection:
         version = self.known_client_version()
         log.info("demux %s: patch info: latest Ubisoft Connect is %s", self.peer, version or "as recorded")
         recorded = self.services.assets.products.patch_info
-        if not recorded:
-            return pb.encode([(1, 1), (3, 0), (5, version), (6, 0), (7, 0)])
+        if not recorded:                # {1 ok, 2 release name, 3 ?, 4 patch base URL, 5 latest version, 6, 7}:
+            # without 2 and 4 Connect keeps its start-up connection open and waits 30 s for a timeout
+            return pb.encode([(1, 1), (2, "0"), (3, 0), (4, PATCH_BASE_URL), (5, version), (6, 0), (7, 0)])
         if not version:
             return recorded
         return pb.encode(pb.replace(pb.decode(recorded), 5, version))
