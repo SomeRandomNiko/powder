@@ -13,7 +13,6 @@ Routes match on the path only; the host matters only for the pack.
 from __future__ import annotations
 
 import datetime
-import json
 import logging
 from pathlib import Path
 
@@ -115,10 +114,10 @@ async def fallback(request: web.Request) -> web.Response:
         if hit:
             break
     if hit is None:
-        built = builtin_http.lookup(request.method, request.path)
+        built = builtin_http.lookup(request.method, request.path, request.query)
         if built is not None:                           # no pack (or not in it): the server's own reply
             request[HOW] = "builtin"
-            return web.Response(body=json.dumps(built).encode(), headers={"Content-Type": routes_ubi.JSON})
+            return web.Response(body=builtin_http.body(built), headers={"Content-Type": routes_ubi.JSON})
         request[HOW] = "UNMATCHED"
         if builtin_http.keep_cached(request.path):      # Connect's UI settings: never overwrite its cache
             if request.headers.get("If-None-Match") or request.headers.get("If-Modified-Since"):
