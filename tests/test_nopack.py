@@ -96,6 +96,18 @@ def test_sdk_services_are_unique():
     assert len(names) == len(set(names)) == 56
 
 
+async def test_overlay_game_card_and_bot_protection_settings(client):
+    r = await client.get(f"/v1/spaces/global/ubiconnect/games/api?spaceIds={SPACE_ID}", headers=UBI)
+    card = (await r.json())["games"][0]
+    assert card["displayName"] == "Steep" and card["platforms"][0]["applicationId"] == APP_ID
+    assert card["displayDescription"] == "" and not any(card["imageUrls"].values())
+    r = await client.get(f"/v1/spaces/{SPACE_ID}/global/ubiconnect/games/api", headers=UBI)
+    assert (await r.json())["spaceId"] == SPACE_ID
+    r = await client.get("/v1/spaces/ec66c7e2-7b44-471c-a3ab-9d1da48153c3/parameters"
+                         "?parameterGroups=ubiConnect-dataDomeConfig", headers=UBI)
+    assert r.status == 200 and await r.json() == {"parameters": {}}
+
+
 async def test_overlay_settings_without_ubisoft_parts_but_cache_first(client):
     path = "/v4/spaces/global/ubiconnect/configcache/api/postauth?bundleEnv=prod&applications=a,b"
     r = await client.get(path, headers={**UBI, "If-None-Match": '"x"'})

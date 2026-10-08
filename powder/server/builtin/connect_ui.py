@@ -13,6 +13,8 @@ and lifecycle methods mount(el) -> true, beforeActivate() -> true, beforeDeactiv
 """
 from __future__ import annotations
 
+from ..constants import APP_ID, SPACE_ID
+
 REMOTELOG = "https://public-ubiservices.ubi.com/v1/profiles/me/remotelog"
 LOG_CATEGORIES = """api focus input shell streaming webSocket gameLaunch navigation unexpected performance
 shellPlugin kinderGarden apiValidation configuration serviceWorker uncategorized authentication initialization
@@ -96,6 +98,24 @@ def client_parameters() -> dict:
     address (without it the overlay fails with dolphin-029); account-security settings are left out."""
     return {"parameters": {"uplayPc-clientConfigs": {"fields": {"ubisoftConnectOverlayUrlV2": OVERLAY_URL},
                                                      "relatedPopulation": None}}}
+
+
+def game_card(space_id: str) -> dict | None:
+    """Connect's card for Steep (GET .../ubiconnect/games/api): ids and name only, no texts or images.
+    The overlay waits for it (about 4 s without one) before the game logs in."""
+    if space_id != SPACE_ID:
+        return None
+    return {"spaceId": SPACE_ID, "installmentSpaceId": SPACE_ID, "displayName": "Steep", "displayDescription": "",
+            "platforms": [{"type": "PC", "displayName": "PC", "applicationId": APP_ID}], "siblingGames": [],
+            "installmentDefault": True, "ageRating": None, "releaseAt": None, "releaseStatusDisplayName": None,
+            "imageUrls": {k: None for k in ("lowThumbnail", "highThumbnail", "background", "lowBoxArt",
+                                            "highBoxArt", "gameLogoFlat", "gameLogoColor", "gameAvatar")},
+            "linkUrls": {k: None for k in ("facebook", "twitter", "instagram", "reddit", "website")}}
+
+
+def game_cards(query) -> dict | None:
+    cards = [c for c in (game_card(s) for s in query.get("spaceIds", "").split(",")) if c]
+    return {"games": cards} if cards else None
 
 
 def postauth(query) -> dict | None:
