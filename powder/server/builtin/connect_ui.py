@@ -1,9 +1,15 @@
 """Ubisoft Connect's in-game overlay settings (configcache/api/postauth), without a pack.
 
-The overlay (Shift+F2) is a frame that loads its parts (profile, notifications, friends, store...) from
-Ubisoft's CDN; these settings list the parts and switch features. Unlike Connect's main window, the
-overlay does not cache them, and without them it fails to open (dolphin-040). These are written for
-Powder: valid, with no parts listed, so the overlay opens but stays empty. Logs and metrics are off.
+The overlay (Shift+F2) is a frame (a "shell" from Ubisoft's CDN) that loads its parts ("micro apps":
+profile, friends, store...) from the addresses these settings list. Unlike Connect's main window, the
+overlay does not cache them: without them it fails to open (dolphin-040), and with no part listed too
+(dolphin-029). These are written for Powder: a single part of our own, served by this server
+(/_powder/overlay/powder.js), and no Ubisoft parts. Achievement pop-ups are drawn by the frame itself
+(features.achievementNotification). Logs and metrics are off.
+
+The part's contract (from the shell's code): a SystemJS module whose default export is a class with a
+static apiVersion, constructed as new App(shellApi, appConfig) with appName equal to the settings entry's,
+and lifecycle methods mount(el) -> true, beforeActivate() -> true, beforeDeactivate(), beforeUnmount().
 """
 from __future__ import annotations
 
@@ -13,9 +19,52 @@ shellPlugin kinderGarden apiValidation configuration serviceWorker uncategorized
 hostCommunication microAppLifecycle navigationHistory playerNotification""".split()
 
 
-def application_settings() -> dict:
+POWDER_APP = "powder"
+POWDER_SPACE = "b0a5c0de-0000-4000-8000-000000000001"      # made up: the part's own space
+POWDER_PART_PATH = "/_powder/overlay/powder.js"
+
+# The Powder part: plain JavaScript, no dependencies (served with CORS, as the CDN does)
+POWDER_PART_JS = """\
+System.register([], function (_export) {
+  return {
+    execute: function () {
+      class Powder {
+        constructor(shellApi, appConfig) {
+          this.shellApi = shellApi; this.appConfig = appConfig; this.appName = "powder";
+        }
+        async mount(el) {
+          el.innerHTML =
+            '<div style="font-family:sans-serif;color:#fff;padding:32px;max-width:560px">' +
+            '<h1 style="font-size:28px;margin:0 0 12px">Powder</h1>' +
+            '<p style="font-size:16px;line-height:1.5;opacity:.85;margin:0">' +
+            'You are playing on a Powder server. Your progress and achievements are stored there; ' +
+            'Ubisoft\\'s overlay pages (profile, friends, store) are not available.</p></div>';
+          return true;
+        }
+        async beforeActivate() { return true; }
+        async beforeDeactivate() { return { confirmationRequired: false, applicationData: null }; }
+        async beforeUnmount() {}
+        async apiUpdated(shellApi) { this.shellApi = shellApi; }
+        static appIsAvailable() { return Promise.resolve(true); }
+      }
+      Powder.apiVersion = "1.1.0";
+      _export("default", Powder);
+    }
+  };
+});
+"""
+
+
+def powder_part(host: str) -> dict:
+    return {"appName": POWDER_APP, "spaceId": POWDER_SPACE, "default": True,
+            "bundleUrl": f"https://{host}{POWDER_PART_PATH}", "manifestUrl": "", "label": "Powder", "iconUrl": "",
+            "parents": [{"parentAppName": None, "order": 0, "defaultPlacement": "main"}],
+            "remoteLogsConfiguration": {"url": REMOTELOG, "maxTextLength": 32768, "uncategorized": "None"}}
+
+
+def application_settings(host: str = "public-ubiservices.ubi.com") -> dict:
     return {
-        "microApplications": [],
+        "microApplications": [powder_part(host)],
         "accessMenu": [],
         "lastUpdate": {"lastUpdateDate": "2016-12-01T00:00:00.000Z", "isMandatory": False},
         "manifests": [],

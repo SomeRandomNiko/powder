@@ -102,5 +102,11 @@ async def test_overlay_settings_without_ubisoft_parts_but_cache_first(client):
     assert r.status == 304                                       # Connect's main window keeps its copy
     r = await client.get(path, headers=UBI)
     body = await r.json()
-    assert set(body) == {"a", "b"} and body["a"]["microApplications"] == []
+    parts = body["a"]["microApplications"]
+    assert set(body) == {"a", "b"} and [p["appName"] for p in parts] == ["powder"]
+    assert parts[0]["default"] and parts[0]["parents"][0]["parentAppName"] is None
     assert "cdn.ubisoft.com" not in json.dumps(body)
+    r = await client.get("/_powder/overlay/powder.js", headers=UBI)
+    script = await r.text()
+    assert r.headers["Access-Control-Allow-Origin"] == "*" and r.content_type == "application/javascript"
+    assert 'Powder.apiVersion = "1.1.0"' in script and '_export("default", Powder)' in script
