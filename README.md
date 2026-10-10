@@ -55,7 +55,7 @@ What Steep needs a server for, and how far Powder covers it.
 | Feature                           | Status | Notes                                                                       |
 | --------------------------------- | ------ | --------------------------------------------------------------------------- |
 | Leaderboards (challenge rankings) | ✅     | The server's players, by their best score; weekly and daily boards show the bests set in that period |
-| Replays / ghosts of other players | ❌     | Uploads and downloads of replays are not stored or served                   |
+| Replays / ghosts of other players | 🟡     | Saved and shared rides, photos (likes, deleting) are kept and seen by the other players; challenge ghosts: the game never creates one yet |
 | Player-made trails / challenges   | ❌     | Always an empty list                                                        |
 | Seasons and tournaments           | 🟡     | No season running, as on Ubisoft's servers at the end; nothing changes      |
 
@@ -63,9 +63,9 @@ What Steep needs a server for, and how far Powder covers it.
 
 | Feature                                                  | Status | Notes                                                                     |
 | -------------------------------------------------------- | ------ | ------------------------------------------------------------------------- |
-| Multiplayer sessions (other riders in the world, groups) | 🟡     | On a local network: riders in the same area of a world see each other (tested with two PCs); joining a friend's group and invites are built, not yet tested with two PCs |
+| Multiplayer sessions (other riders in the world, groups) | ✅     | On a local network (tested with two PCs): riders in the same area meet; groups by pressing G next to each other or "Join group" in the social tab; spectating |
 | Matchmaking                                              | ✅     | Players in the same world and area (cell) are put into one session; no matchmaking map, the game splits areas itself |
-| Friends list, invites, blocks                            | 🟡     | Every other player of the server is a friend (online when their game or Connect is connected); invites go through Ubisoft Connect's chat; no blocks |
+| Friends list, invites, blocks                            | 🟡     | Every other player of the server is a friend (online when their game or Connect is connected). Invites are refused: accepting needs Ubisoft Connect's own pages; no blocks |
 | Other players' profiles (rider card, level)              | ✅     | Steep's profile view of a friend                                          |
 
 ### Ubisoft services around the game
