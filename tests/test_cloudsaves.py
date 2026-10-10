@@ -86,6 +86,10 @@ async def test_a_save_goes_up_and_comes_back(client, services):
     put = await (await client.put(f"/v1/profiles/entities/{created['entityId']}", headers=UBI,
                                   json=entity_body(revision=1))).json()
     assert put["revision"] == 2
+    # seen live: Connect writes to /v1/profiles/entitites/<id> (sic)
+    put = await (await client.put(f"/v1/profiles/entitites/{created['entityId']}", headers=UBI,
+                                  json=entity_body(revision=2, sizes=(11, 22)))).json()
+    assert put["revision"] == 3 and put["obj"]["slots"][1]["size"] == 22
     # another PC asks for download links (method Get) and downloads
     status, got = download_links(services, me, ["1", "2"])
     assert status == 1 and [h for h, _ in got] == ["", ""]

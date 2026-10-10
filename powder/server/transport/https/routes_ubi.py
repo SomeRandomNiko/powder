@@ -353,6 +353,7 @@ def add_routes(app: web.Application) -> None:
     app.router.add_get("/v1/profiles/{profile_id}/entities", get_entities_v1)
     app.router.add_post("/v1/profiles/{profile_id}/entities", write_cloud_entity)
     app.router.add_put("/v1/profiles/entities/{entity_id}", write_cloud_entity)
+    app.router.add_put("/v1/profiles/entitites/{entity_id}", write_cloud_entity)   # sic: what Connect sends
     app.router.add_get("/_powder/cloudsaves/legacy-list/{product}", cloud_save_legacy_list)
     app.router.add_route("*", "/_powder/cloudsaves/{product}/{slot}", cloud_save_file)
     app.router.add_get(r"/{prefix:.*}test_internet.txt", internet_check)
