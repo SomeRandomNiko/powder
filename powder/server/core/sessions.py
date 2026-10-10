@@ -111,14 +111,15 @@ class SessionRegistry:
                 self.by_session_id.pop(s.session_id, None)
 
     # ---- server push (the seam for notifications and multiplayer) ----------------------------
-    async def push_ws(self, profile_id: str, notification_type: str, content: dict) -> int:
-        """Send a UbiServices notification over the player's WebSocket(s); returns how many got it."""
+    async def push_ws(self, profile_id: str, notification_type: str, content, **extra) -> int:
+        """Send a UbiServices notification over the player's WebSocket(s); returns how many got it. `extra`:
+        more fields of the notification (e.g. its sender)."""
         s = self.by_player.get(profile_id)
         sent = 0
         for ws in list(s.websockets if s else ()):
             try:
                 await ws.send_json({"notificationType": notification_type, "content": content,
-                                    "datePosted": iso_now()})
+                                    "datePosted": iso_now(), **extra})
                 sent += 1
             except Exception as e:  # noqa: BLE001 - a dead socket must not break the caller
                 log.warning("push_ws to %s failed: %s", profile_id, e)

@@ -338,6 +338,21 @@ async def channel_messages(request: web.Request) -> web.Response:
     return json_response(request, {"messages": found or [], "nextToken": ""}, "channel-messages")
 
 
+async def send_notification(request: web.Request) -> web.Response:
+    """POST /v2/profiles/{profile_id}/notifications: one game's message to another player's game (Steep's
+    "Spectate" asks the friend this way, STEEP_SPECTATOR). Delivered over the target's notification
+    websocket; the request is logged, as no recording of one exists."""
+    body, sender, target = await _json_body(request), _me(request), _pid(request)
+    log.info("notification from %s to %s: %s", sender, target, json.dumps(body)[:2000])
+    kind = body.get("notificationType") or body.get("type") or ""
+    content = body.get("content", body)
+    sent = await _services(request).sessions.push_ws(target, kind, content, source={"profileId": sender},
+                                                     spaceId=body.get("spaceId", SPACE_ID))
+    if not sent:
+        log.info("notification %s to %s: no websocket open, not delivered", kind, target)
+    return json_response(request, {}, "notification-sent")
+
+
 async def club_title(request: web.Request) -> web.Response:
     pid = _pid(request)
     return json_response(request, {
@@ -376,6 +391,7 @@ def add_routes(app: web.Application) -> None:
     r.add_get("/v2/spaces/{space}/entities", space_entities)
     r.add_route("*", "/ugc/v1/{ugc_id}/{action}", no_content)
     r.add_route("*", "/v2/connections/{tail:.*}", _ok({}, "notifications"))
+    r.add_post(f"/v2/profiles/{pid}/notifications", send_notification)
     # Ubisoft Connect
     r.add_get("/v3/users/me", users_me)
     r.add_get("/v3/users/me/profiles", users_me_profiles)

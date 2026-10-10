@@ -207,6 +207,23 @@ async def test_a_friend_in_steep_has_a_connection(client, services):
     assert len((await (await client.get(url, headers=UBI)).json())["connections"]) == 1
 
 
+async def test_a_notification_reaches_the_other_players_game(client, services):
+    """POST /v2/profiles/{id}/notifications (Steep's Spectate asks the friend this way)."""
+    guest = services.accounts.register("guest@example.com", "correct horse", "Guest")
+    got = []
+
+    class FakeWs:
+        async def send_json(self, data):
+            got.append(data)
+    services.sessions.issue(services.accounts.player(guest.profile_id), "192.0.2.20").websockets.add(FakeWs())
+    r = await client.post(f"/v2/profiles/{guest.profile_id}/notifications", headers=UBI,
+                          json={"notificationType": "STEEP_SPECTATOR", "content": {"ask": 1}, "spaceId": SPACE_ID})
+    assert r.status == 200
+    (n,) = got
+    assert (n["notificationType"], n["content"], n["spaceId"]) == ("STEEP_SPECTATOR", {"ask": 1}, SPACE_ID)
+    assert n["source"]["profileId"] == services.default_player_id()
+
+
 async def test_connect_achievement_view(client, services):
     """Ubisoft Connect's UI asks for achievements over GraphQL (batched): titles, icons and the player's
     unlocks come from the pack and the database."""
