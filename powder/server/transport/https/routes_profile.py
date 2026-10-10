@@ -387,9 +387,7 @@ def add_routes(app: web.Application) -> None:
     r.add_post("/v1/profiles/me/remotelog", remotelog)
     r.add_post("/v3/profiles/me/events", _ok({}, "events"))
     r.add_post("/v5/spaces/{space}/serviceEvents", _ok({}, "service-events"))
-    r.add_get("/ugc/v1/", _ok([], "ugc"))
     r.add_get("/v2/spaces/{space}/entities", space_entities)
-    r.add_route("*", "/ugc/v1/{ugc_id}/{action}", no_content)
     r.add_route("*", "/v2/connections/{tail:.*}", _ok({}, "notifications"))
     r.add_post(f"/v2/profiles/{pid}/notifications", send_notification)
     # Ubisoft Connect

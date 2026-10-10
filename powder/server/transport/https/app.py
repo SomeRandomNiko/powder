@@ -24,7 +24,7 @@ from ... import tls
 from ...builtin import http as builtin_http
 from ...constants import APP_ID
 from ...core.identity import parse_authorization
-from . import routes_profile, routes_powder, routes_ubi
+from . import routes_profile, routes_powder, routes_ubi, routes_ugc
 from .keys import DATA_DIR, FALLBACK, HOW, NEX_PUBLIC_KEY, PLUGINS, SERVICES, SESSION
 from .routes_ubi import client_ip
 from .websocket import websocket
@@ -175,7 +175,7 @@ def with_storm(body: bytes, settings: dict | None) -> bytes:
 
 def build_app(services, plugins=None, *, nex_public_key: str = "") -> web.Application:
     app = web.Application(middlewares=[log_middleware, cors_middleware, plugin_middleware, session_middleware],
-                          client_max_size=16 * 1024 * 1024)
+                          client_max_size=64 * 1024 * 1024)   # UGC files (photos, trails)
     app[SERVICES] = services
     app[PLUGINS] = plugins
     app[NEX_PUBLIC_KEY] = nex_public_key
@@ -184,6 +184,7 @@ def build_app(services, plugins=None, *, nex_public_key: str = "") -> web.Applic
     routes_powder.add_routes(app)
     routes_profile.add_routes(app)
     routes_ubi.add_routes(app)
+    routes_ugc.add_routes(app)
     app.router.add_get("/v2/websocket", websocket)
     app.router.add_route("*", "/{tail:.*}", fallback)      # last: everything else
     return app

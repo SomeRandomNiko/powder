@@ -341,6 +341,62 @@ class KvRepo:
                         "DO UPDATE SET value_json = excluded.value_json", (scope, key, json.dumps(value)))
 
 
+class UgcRepo:
+    """Player-made content items (photos, trails, ...) as dicts: ugc_id, type_id, world_id, profile_id,
+    pub_date, metadata, tags, extra, hidden, downloads, likes (count), liked_by (set)."""
+
+    def __init__(self, db: Database):
+        self.db = db
+
+    def _item(self, r) -> dict:
+        likers = {x["profile_id"] for x in self.db.execute(
+            "SELECT profile_id FROM ugc_likes WHERE ugc_id = ?", (r["ugc_id"],))}
+        return {"ugc_id": r["ugc_id"], "type_id": r["type_id"], "world_id": r["world_id"],
+                "profile_id": r["profile_id"], "pub_date": r["pub_date"], "metadata": json.loads(r["metadata_json"]),
+                "tags": json.loads(r["tags_json"]), "extra": json.loads(r["extra_json"]), "hidden": bool(r["hidden"]),
+                "downloads": r["downloads"], "likes": len(likers), "liked_by": likers}
+
+    def create(self, ugc_id: str, type_id: int, world_id: int | None, profile_id: str, metadata: dict,
+               tags: list, extra: dict) -> dict:
+        self.db.execute(
+            "INSERT INTO ugc(ugc_id, type_id, world_id, profile_id, pub_date, metadata_json, tags_json, extra_json) "
+            "VALUES (?,?,?,?,?,?,?,?)", (ugc_id, type_id, world_id, profile_id.lower(), utc_now(),
+                                         json.dumps(metadata), json.dumps(tags), json.dumps(extra)))
+        return self.get(ugc_id)
+
+    def get(self, ugc_id: str) -> dict | None:
+        r = self.db.execute("SELECT * FROM ugc WHERE ugc_id = ?", (ugc_id,)).fetchone()
+        return self._item(r) if r else None
+
+    def find(self, type_id: int | None = None, world_id: int | None = None,
+             profile_ids: list[str] | None = None) -> list[dict]:
+        sql, args = "SELECT * FROM ugc WHERE hidden = 0", []
+        if type_id is not None:
+            sql, args = sql + " AND type_id = ?", [*args, type_id]
+        if world_id is not None:
+            sql, args = sql + " AND world_id = ?", [*args, world_id]
+        if profile_ids:
+            sql += f" AND profile_id IN ({','.join('?' * len(profile_ids))})"
+            args += [p.lower() for p in profile_ids]
+        return [self._item(r) for r in self.db.execute(sql + " ORDER BY pub_date DESC", args)]
+
+    def delete(self, ugc_id: str) -> None:
+        self.db.execute("DELETE FROM ugc WHERE ugc_id = ?", (ugc_id,))
+
+    def hide(self, ugc_id: str) -> None:
+        self.db.execute("UPDATE ugc SET hidden = 1 WHERE ugc_id = ?", (ugc_id,))
+
+    def downloaded(self, ugc_id: str) -> None:
+        self.db.execute("UPDATE ugc SET downloads = downloads + 1 WHERE ugc_id = ?", (ugc_id,))
+
+    def like(self, ugc_id: str, profile_id: str, liked: bool = True) -> None:
+        if liked:
+            self.db.execute("INSERT OR IGNORE INTO ugc_likes(ugc_id, profile_id) VALUES (?,?)",
+                            (ugc_id, profile_id.lower()))
+        else:
+            self.db.execute("DELETE FROM ugc_likes WHERE ugc_id = ? AND profile_id = ?", (ugc_id, profile_id.lower()))
+
+
 class Repos:
     """All repositories over one database."""
 
@@ -357,3 +413,4 @@ class Repos:
         self.achievements = AchievementsRepo(db)
         self.accounts = AccountsRepo(db)
         self.remember_tickets = RememberTicketsRepo(db)
+        self.ugc = UgcRepo(db)
