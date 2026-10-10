@@ -82,6 +82,25 @@ def cloudsave_links(ctx: ServiceContext, req: ServiceRequest) -> bytes:
     return make_reply(req, 2, [(1, CLOUD_OK), *entries])
 
 
+# 3 = CloudsaveReq (Ubisoft's old cloud save system) {1 uplay id, 2 put / 3 get / 4 delete item, 5 list items,
+#   6 username, 7 ownership token} -> 3 CloudsaveRsp {1 status (0 Ok, 1 InternalError, 2 Denied), 2 method,
+#   3 path, 4 host, 5 header}: an HTTP request for Connect to make itself (an S3 request, in the old system).
+#   Connect lists the old slots when the player has no cloud save yet ("Migrate to new cloud save system"):
+#   the listing here is always empty, so there is nothing to migrate.
+LEGACY_OK, LEGACY_ERROR = 0, 1
+
+
+@handler("cloudsave_service", 3)
+def cloudsave_legacy(ctx: ServiceContext, req: ServiceRequest) -> bytes:
+    body = pb.try_decode(req.body) if isinstance(req.body, bytes) else None
+    if not body or pb.first(body, 5) is None:            # only listing is asked for (migration)
+        log.warning("cloud save (old system) request not supported: %s", sorted({f[0] for f in body or []}))
+        return make_reply(req, 3, [(1, LEGACY_ERROR)])
+    log.info("cloud save of %s: old-system listing for product %s (always empty)", ctx.profile_id, pb.first(body, 1))
+    return make_reply(req, 3, [(1, LEGACY_OK), (2, "GET"), (3, f"/_powder/cloudsaves/legacy-list/{pb.first(body, 1)}"),
+                               (4, "public-ubiservices.ubi.com"), (5, "")])
+
+
 # ownership tokens and signatures (mg.protocol.ownership, definitions from Connect): 28 OwnershipTokenReq
 #   {1 product} -> 27 OwnershipTokenRsp {1 success, 2 token, 3 expiration}; 26 SignOwnershipReq {1 product} ->
 #   25 SignOwnershipRsp {1 success, 2 branch id, 3 expiration, 4 signature}. Connect needs them e.g. before a

@@ -312,6 +312,17 @@ async def write_cloud_entity(request: web.Request) -> web.Response:
     return json_response(request, e, f"cloud-save-written(rev {e['revision']})")
 
 
+EMPTY_S3_LISTING = ('<?xml version="1.0" encoding="UTF-8"?>\n<ListBucketResult xmlns="http://s3.amazonaws.com/doc/'
+                    '2006-03-01/"><Name>savegames</Name><Prefix></Prefix><KeyCount>0</KeyCount><MaxKeys>1000</MaxKeys>'
+                    '<IsTruncated>false</IsTruncated></ListBucketResult>')
+
+
+async def cloud_save_legacy_list(request: web.Request) -> web.Response:
+    """The listing Connect makes when migrating from Ubisoft's old cloud saves (an S3 bucket listing): empty."""
+    request[HOW] = "cloud-save-legacy-list"
+    return web.Response(text=EMPTY_S3_LISTING, content_type="application/xml")
+
+
 async def cloud_save_file(request: web.Request) -> web.StreamResponse:
     """The links Connect gets from the demux cloudsave_service: PUT uploads a slot, GET / HEAD download it."""
     services = request.app[SERVICES]
@@ -339,6 +350,7 @@ def add_routes(app: web.Application) -> None:
     app.router.add_get("/v1/profiles/{profile_id}/entities", get_entities_v1)
     app.router.add_post("/v1/profiles/{profile_id}/entities", write_cloud_entity)
     app.router.add_put("/v1/profiles/entities/{entity_id}", write_cloud_entity)
+    app.router.add_get("/_powder/cloudsaves/legacy-list/{product}", cloud_save_legacy_list)
     app.router.add_route("*", "/_powder/cloudsaves/{product}/{slot}", cloud_save_file)
     app.router.add_get(r"/{prefix:.*}test_internet.txt", internet_check)
     app.router.add_post("/v3/profiles/sessions", create_session)

@@ -127,6 +127,17 @@ async def test_links_and_entities_belong_to_one_player(client, services):
         {"entities": []}
 
 
+async def test_nothing_to_migrate_from_the_old_cloud_saves(client, services):
+    """Without a cloud save, Connect lists the old system's slots first (CloudsaveReq list_items): empty."""
+    request = pb.encode([(1, [(1, 4), (3, [(1, PRODUCT), (5, b""), (6, "Rider"), (7, "ownership-token")])])])
+    reply = pb.decode(pb.first(pb.decode(answer(ServiceContext(services, services.default_player_id()),
+                                                "cloudsave_service", request)), 1))
+    rsp = pb.decode(pb.first(reply, 3))
+    assert pb.first(rsp, 1, 0) == 0 and pb.text(rsp, 2) == "GET" and pb.text(rsp, 4) == syn.UBI
+    r = await client.get(pb.text(rsp, 3), headers=UBI)
+    assert r.status == 200 and "<KeyCount>0</KeyCount>" in await r.text()
+
+
 def test_ownership_token_and_signature(services, player):
     """Connect asks for these (e.g. before a cloud save sync); definitions from Connect's mg.protocol.ownership."""
     ctx = ServiceContext(services, services.default_player_id())
