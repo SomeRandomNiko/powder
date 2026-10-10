@@ -172,6 +172,23 @@ async def test_personal_endpoints_are_generated_not_replayed(client):
     assert (await (await client.get("/ugc/v1/?algo=Steep", headers={"Host": "steep-prod-pc.steep.olympus.ubi.com"})).json()) == []
 
 
+async def test_every_other_player_is_a_friend(client, services):
+    """The game's friends list (social tab) and Connect's: the server's other players, with online status."""
+    services.accounts.register("host@example.com", "correct horse", "")          # takes over syn.PLAYER
+    guest = services.accounts.register("guest@example.com", "correct horse", "Guest")
+    game = (await (await client.get("/v2/profiles/me/friends", headers=UBI)).json())["friends"]
+    assert [(f["pid"], f["nameOnPlatform"], f["state"]) for f in game] == [(guest.profile_id, "Guest", "Friends")]
+    plain = (await (await client.get(f"/v3/profiles/{syn.PLAYER}/friends", headers=UBI)).json())["friends"]
+    assert [f["pid"] for f in plain] == [guest.profile_id] and "friendshipDate" in plain[0]
+    url = f"/v3/profiles/{syn.PLAYER}/global/harboursocial/friends/core/enriched"
+    assert (await (await client.get(url, headers=UBI)).json())["friends"][0]["onlineStatus"] == "offline"
+    services.connect_clients.add(type("Conn", (), {"profile_id": guest.profile_id})())   # Guest's Connect is on
+    assert (await (await client.get(url, headers=UBI)).json())["friends"][0]["onlineStatus"] == "online"
+    user = services.repos.players.get(guest.profile_id).user_id
+    statuses = (await (await client.get(f"/v1/users/onlineStatuses?UserIds={user}", headers=UBI)).json())
+    assert statuses["onlineStatuses"][0]["onlineStatus"] == "online"
+
+
 async def test_connect_achievement_view(client, services):
     """Ubisoft Connect's UI asks for achievements over GraphQL (batched): titles, icons and the player's
     unlocks come from the pack and the database."""

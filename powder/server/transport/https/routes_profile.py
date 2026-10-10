@@ -1,6 +1,7 @@
 """Player-related UbiServices endpoints answered from the player record (no recordings): the game's and
 Ubisoft Connect's profile, social, news and telemetry calls. Most only need a well-formed answer: empty
-lists for friends, news and other people's content; neutral values for account details.
+lists for news and other people's content; neutral values for account details. Friends: every other player of
+the server (services/friends.py).
 """
 from __future__ import annotations
 
@@ -11,6 +12,7 @@ import uuid
 from aiohttp import web
 
 from ...constants import SPACE_ID
+from ...services import friends
 from ...util import iso_now
 from .keys import HOW, SERVICES, SESSION
 from .routes_ubi import json_response
@@ -242,10 +244,38 @@ async def iplocation(request: web.Request) -> web.Response:
 async def online_statuses(request: web.Request) -> web.Response:
     ids = [u for u in request.query.get("UserIds", request.query.get("userIds", "")).split(",") if u]
     services = _services(request)
-    online = {s.player.user_id.lower() for s in services.sessions.by_player.values()}
+    now = friends.online_profiles(services)
+    online = {p.user_id.lower() for p in services.repos.players.all() if p.profile_id in now}
     return json_response(request, {"onlineStatuses": [
         {"connections": [], "onlineStatus": "online" if u.lower() in online else "offline", "userId": u}
         for u in ids]}, "online-statuses")
+
+
+def _friends(request: web.Request, pid: str | None) -> list:
+    return friends.friends_of(_services(request), pid)
+
+
+async def game_friends(request: web.Request) -> web.Response:
+    """The game's friends list (its social tab): every other player of the server (services/friends.py)."""
+    since = iso_now()
+    return json_response(request, {"friends": [
+        {"pid": f.profile_id, "nameOnPlatform": f.name, "state": "Friends", "lastModified": since}
+        for f in _friends(request, _me(request))]}, "friends")
+
+
+async def connect_friends(request: web.Request) -> web.Response:
+    """Ubisoft Connect's friends list; the enriched one (harboursocial) also has each one's online status."""
+    since, enriched = iso_now(), request.path.endswith("/enriched")
+    online = friends.online_profiles(_services(request)) if enriched else set()
+    out = []
+    for f in _friends(request, _pid(request)):
+        entry = {"isFavorite": False, "lastModified": since, "nickname": "", "pid": f.profile_id, "state": "Friends"}
+        if enriched:
+            entry["onlineStatus"] = "online" if f.profile_id in online else "offline"
+        else:
+            entry["friendshipDate"] = since
+        out.append(entry)
+    return json_response(request, {"groupId": str(uuid.uuid4()), "friends": out}, "friends")
 
 
 async def club_title(request: web.Request) -> web.Response:
@@ -275,7 +305,7 @@ def add_routes(app: web.Application) -> None:
     r.add_put("/v1/profiles/me/populations/data", populations)
     r.add_get(f"/v1/profiles/{pid}/actions", actions)
     r.add_get(f"/v1/profiles/{pid}/rewards", _ok({"rewards": []}, "rewards"))
-    r.add_get("/v2/profiles/me/friends", _ok({"friends": []}, "friends"))
+    r.add_get("/v2/profiles/me/friends", game_friends)
     r.add_get("/v3/profiles", profiles_lookup)
     r.add_get("/v1/profiles/me/news", _ok({"news": []}, "news"))
     r.add_get("/v1/profiles/connections", _ok({"connections": []}, "connections"))
@@ -296,9 +326,8 @@ def add_routes(app: web.Application) -> None:
     r.add_get("/v1/users/{user_id}/subscriptions", _ok({"subscriptions": []}, "subscriptions"))
     r.add_get("/v1/users/onlineStatuses", online_statuses)
     r.add_get("/v2/profiles/me/iplocation", iplocation)
-    r.add_get(f"/v3/profiles/{pid}/friends", _ok(lambda: {"groupId": str(uuid.uuid4()), "friends": []}, "friends"))
-    r.add_get(f"/v3/profiles/{pid}/global/harboursocial/friends/core/enriched",
-              _ok(lambda: {"groupId": str(uuid.uuid4()), "friends": []}, "friends"))
+    r.add_get(f"/v3/profiles/{pid}/friends", connect_friends)
+    r.add_get(f"/v3/profiles/{pid}/global/harboursocial/friends/core/enriched", connect_friends)
     r.add_get(f"/v1/profiles/{pid}/blocks", _ok(lambda: {"groupId": str(uuid.uuid4()), "profiles": []}, "blocks"))
     r.add_get(f"/v1/profiles/{pid}/connections", _ok({"connections": []}, "connections"))
     r.add_get(f"/v1/profiles/{pid}/avatars", _ok({"type": "default", "imageVariations": []}, "avatars"))
