@@ -3,9 +3,12 @@ that only need a plausible answer are in routes_profile.py; game-wide data comes
 pack (app.py fallback)."""
 from __future__ import annotations
 
+import datetime
 import json
 import logging
+import re
 import secrets
+import time
 
 from aiohttp import web
 
@@ -15,7 +18,7 @@ from ...core.identity import LoginRequest, parse_authorization
 from ...services.accounts import AuthError, basic_credentials
 from ...services.economy import EconomyError
 from ...util import iso_now
-from .keys import HOW, NEX_PUBLIC_KEY, SERVICES, SESSION
+from .keys import DATA_DIR, HOW, NEX_PUBLIC_KEY, SERVICES, SESSION
 
 log = logging.getLogger("powder.https")
 JSON = "application/json; charset=utf-8"
@@ -155,13 +158,50 @@ def _int(q, name: str, default: int) -> int:
         return default
 
 
+ENTITY_FILE = re.compile(r"^[0-9a-f-]{36}$")
+STORAGE_LINK_S = 3600
+
+
+def _storage(request: web.Request, entity: dict | None, write: bool = False) -> dict | None:
+    """An entity with a file (extendedStorage, e.g. a saved replay or a challenge ghost) gets links to it on
+    this server, as Ubisoft's gave links to S3: putUrl / deleteUrl after a write (the game uploads there),
+    getUrl / headUrl on reads."""
+    if not entity or not isinstance(entity.get("extendedStorage"), dict):
+        return entity
+    url = f"https://{request.host}/_powder/entity-files/{entity['entityId']}"
+    expires = datetime.datetime.fromtimestamp(time.time() + STORAGE_LINK_S, datetime.UTC).strftime("%Y-%m-%dT%H:%M:%SZ")
+    links = ({"putUrl": url, "deleteUrl": url} if write else {}) | {"headUrl": url, "getUrl": url}
+    return {**entity, "extendedStorage": {**entity["extendedStorage"], "provider": "s3", **links,
+                                          "expirationTime": expires}}
+
+
+async def entity_file(request: web.Request) -> web.StreamResponse:
+    """The file behind an entity's links: PUT (upload), GET / HEAD (download), DELETE."""
+    entity_id = request.match_info["entity_id"].lower()
+    if not ENTITY_FILE.match(entity_id) or request.app[SERVICES].entities.get(entity_id) is None:
+        return web.Response(status=404)
+    path = request.app[DATA_DIR] / "entity-files" / entity_id
+    if request.method in ("PUT", "POST"):
+        data = await request.read()
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_bytes(data)
+        log.info("entity file %s uploaded (%d B)", entity_id, len(data))
+        return web.Response(status=200)
+    if request.method == "DELETE":
+        path.unlink(missing_ok=True)
+        return web.Response(status=204)
+    if not path.exists():
+        return web.Response(status=404)
+    return web.FileResponse(path, headers={"Content-Type": "application/octet-stream"})
+
+
 async def get_profile_entities(request: web.Request) -> web.StreamResponse:
     """GET /v2/profiles/{pid}/entities?type=&tags=&offset=&limit= (own player from the DB)."""
     entities = request.app[SERVICES].entities
     pid = request.match_info["profile_id"]
     q = request.query
     items = entities.for_profile(pid, q.get("type"), q.get("tags"), _int(q, "offset", 0), _int(q, "limit", 100))
-    return json_response(request, {"entities": items}, f"entities({len(items)})")
+    return json_response(request, {"entities": [_storage(request, e) for e in items]}, f"entities({len(items)})")
 
 
 async def get_entities_batch(request: web.Request) -> web.StreamResponse:
@@ -170,7 +210,7 @@ async def get_entities_batch(request: web.Request) -> web.StreamResponse:
     ids = [p for p in q.get("profileIds", "").split(",") if p]
     items = request.app[SERVICES].entities.for_profiles(ids, q.get("type"), _int(q, "offset", 0),
                                                          _int(q, "limit", 100))
-    return json_response(request, {"entities": items}, f"entities({len(items)})")
+    return json_response(request, {"entities": [_storage(request, e) for e in items]}, f"entities({len(items)})")
 
 
 def _owner(request: web.Request) -> str | None:
@@ -183,7 +223,7 @@ async def get_entity(request: web.Request) -> web.StreamResponse:
     if e is None:
         return json_response(request, {"errorCode": 1002, "message": "entity not found", "httpCode": 404},
                              "entity-missing", 404)
-    return json_response(request, e, "entity")
+    return json_response(request, _storage(request, e), "entity")
 
 
 async def put_entity(request: web.Request) -> web.Response:
@@ -192,7 +232,7 @@ async def put_entity(request: web.Request) -> web.Response:
         e = request.app[SERVICES].entities.put(request.match_info["entity_id"], body, _owner(request))
     except ValueError as err:
         return json_response(request, {"errorCode": 1, "message": str(err), "httpCode": 400}, "bad-request", 400)
-    return json_response(request, e, f"entity-saved(rev {e['revision']})")
+    return json_response(request, _storage(request, e, write=True), f"entity-saved(rev {e['revision']})")
 
 
 async def post_entity(request: web.Request) -> web.Response:
@@ -203,11 +243,13 @@ async def post_entity(request: web.Request) -> web.Response:
         e = request.app[SERVICES].entities.create(await request.json(), owner)
     except ValueError as err:
         return json_response(request, {"errorCode": 1, "message": str(err), "httpCode": 400}, "bad-request", 400)
-    return json_response(request, e, "entity-created")
+    return json_response(request, _storage(request, e, write=True), "entity-created")
 
 
 async def delete_entity(request: web.Request) -> web.Response:
     deleted = request.app[SERVICES].entities.delete(request.match_info["entity_id"])
+    if ENTITY_FILE.match(request.match_info["entity_id"].lower()):
+        (request.app[DATA_DIR] / "entity-files" / request.match_info["entity_id"].lower()).unlink(missing_ok=True)
     return json_response(request, {}, "entity-deleted" if deleted else "entity-absent")
 
 
@@ -243,3 +285,4 @@ def add_routes(app: web.Application) -> None:
     app.router.add_delete("/v2/profiles/entities/{entity_id}", delete_entity)
     app.router.add_get("/v2/profiles/{profile_id}/entities", get_profile_entities)
     app.router.add_post("/v2/profiles/{profile_id}/entities", post_entity)
+    app.router.add_route("*", "/_powder/entity-files/{entity_id}", entity_file)

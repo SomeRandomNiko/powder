@@ -38,6 +38,23 @@ async def test_a_photo_round_trip(client, services):
     assert (await client.get("/_powder/ugc/not-an-item", headers=OLYMPUS)).status == 404
 
 
+async def test_a_saved_replay_gets_its_file_stored(client, services):
+    """Saving a replay: an entity asking for extended storage gets a putUrl; reads get getUrl / headUrl."""
+    ubi = {"Host": "public-ubiservices.ubi.com"}
+    body = {"type": "FAVORITE_REPLAY", "name": "DefaultEntityName", "tags": ["TRAIL", "REPLAY"],
+            "obj": {"savename": "TrailReport_1"}, "extendedStorage": {"provider": "s3", "fileExtension": ""}}
+    created = await (await client.post("/v2/profiles/entities", headers=ubi, json=body)).json()
+    storage = created["extendedStorage"]
+    assert storage["provider"] == "s3" and storage["putUrl"].startswith("https://public-ubiservices.ubi.com/")
+    path = storage["putUrl"].split(".com", 1)[1]
+    assert (await client.put(path, data=b"REPLAYDATA", headers=ubi)).status == 200
+    read = await (await client.get(f"/v2/profiles/entities/{created['entityId']}", headers=ubi)).json()
+    assert "putUrl" not in read["extendedStorage"] and read["extendedStorage"]["getUrl"] == storage["putUrl"]
+    assert await (await client.get(path, headers=ubi)).read() == b"REPLAYDATA"
+    await client.delete(f"/v2/profiles/entities/{created['entityId']}", headers=ubi)
+    assert (await client.get(path, headers=ubi)).status == 404
+
+
 async def test_only_the_owner_hides_or_deletes(client, services):
     services.accounts.register("host@example.com", "correct horse", "")        # takes over the requester
     other = services.accounts.register("guest@example.com", "correct horse", "Guest")
