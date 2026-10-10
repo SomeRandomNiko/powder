@@ -74,7 +74,7 @@ What Steep needs a server for, and how far Powder covers it.
 | ----------------------------------------------------------------- | ------ | --------------------------------------------------------------------------------------- |
 | Ubisoft Connect window and in-game overlay (Shift+F2)             | 🟡     | With the game-data pack: Ubisoft's pages; without it: a Powder page of its own            |
 | Ubisoft Club (actions, units, rewards)                            | ⛔     | Ubisoft's cross-game reward system: the action list is shown, no progress or rewards    |
-| Cloud saves                                                       | ❌     | Switched off, so Connect never asks to sync; game settings stay on each PC              |
+| Cloud saves                                                       | ✅     | The game's own save files follow your account to another PC, also between the Steam and the Ubisoft Connect version |
 | News, recommendations, Ubisoft Connect store and free-games pages | ⛔     | Ubisoft's own content, not part of Steep                                                |
 | Telemetry, crash reports                                          | ⛔     | Acknowledged and dropped (the game's error reports are kept in the server's log folder) |
 

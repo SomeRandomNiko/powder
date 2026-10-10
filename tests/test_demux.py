@@ -150,12 +150,12 @@ async def test_session_over_tls(demux):
         cid_own, cid_ach = pb.first(own, 1), pb.first(ach, 1)
         assert pb.first(own, 2) == 1 and cid_own != cid_ach
 
-        # owned games: Steep's products from the pack, not the rest of the library, cloud saves off
+        # owned games: Steep's products from the pack, not the rest of the library, cloud saves on (default)
         reply = pb.decode(pb.first(pb.decode(await c.data(cid_own, pb.encode([(1, [(1, 8), (2, b"")])]))), 1))
         assert pb.first(reply, 1) == 8
         products = [pb.decode(v) for n, v, _ in pb.decode(pb.first(pb.decode(pb.first(reply, 2)), 2))]
         assert sorted(pb.first(p, 1) for p in products) == [synthetic.STEEP_STEAM, synthetic.STEEP, synthetic.ADDON]
-        assert all(b"cloud_saves: yes" not in pb.first(p, 17, b"") for p in products)
+        assert any(b"cloud_saves: yes" in pb.first(p, 17, b"") for p in products)
 
         # ownership token request (nested style): a fresh token, our request id
         reply = pb.decode(pb.first(pb.decode(await c.data(cid_own, pb.encode(

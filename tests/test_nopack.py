@@ -48,7 +48,7 @@ def test_owned_games_list_steep_for_both_versions(nopack):
     assert "relative: steep.exe" in connect and "Installs\\3279\\InstallDir" in connect
     assert "steam_app_id: 460920" in steam and "name: Steam" in steam
     for text in (connect, steam):
-        assert "cloud_saves: no" in text and f"app_id: {APP_ID}" in text and f"space_id: {SPACE_ID}" in text
+        assert "cloud_saves: yes" in text and f"app_id: {APP_ID}" in text and f"space_id: {SPACE_ID}" in text
         assert "achievements:" not in text                      # no definitions file without a pack
 
 
