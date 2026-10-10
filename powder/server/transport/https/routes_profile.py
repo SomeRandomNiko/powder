@@ -47,26 +47,12 @@ def _for_player(build, how):
     return handler
 
 
-# Matchmaking map per world (tag WORLD_<world id in hex>): which version of the map the game should use
-# to place players into world cells for matchmaking. Without one the game never opens a match ticket.
-# The map data itself comes with the game; only the version is given here (unknown worlds: 1).
-MATCHMAKING_MAP_VERSIONS = {"WORLD_7a954c6bd0": 1, "WORLD_d6ce6d6c20": 1, "WORLD_10af88fa9e4": 3}
-
-
-def matchmaking_map(space_id: str, tag: str) -> dict:
-    version = MATCHMAKING_MAP_VERSIONS.get(tag, 1)
-    return {"entityId": str(uuid.uuid5(uuid.NAMESPACE_URL, f"powder:matchmaking-map:{tag}")), "spaceId": space_id,
-            "type": "TITLE_MATCHMAKING_MAP", "name": f"Matchmaking map v{version}", "tags": [tag],
-            "obj": {"version": version}, "lastModified": "2017-01-01T00:00:00.000Z", "revision": 1}
-
-
 async def space_entities(request: web.Request) -> web.Response:
-    """Game-wide entities: matchmaking maps (built in); player-made trail challenges are not kept (none)."""
-    entities = []
-    if request.query.get("type") == "TITLE_MATCHMAKING_MAP":
-        tags = [t for t in request.query.get("tags", "").split(",") if t.startswith("WORLD_")]
-        entities = [matchmaking_map(request.match_info["space"], t) for t in tags]
-    return json_response(request, {"entities": entities}, f"space-entities({len(entities)})")
+    """Game-wide entities: none. Player-made trail challenges are not kept. The world's matchmaking map
+    (TITLE_MATCHMAKING_MAP) stays empty on purpose: with no entity the game matchmakes without a map
+    (MatchmakingCellsService goes on), while an entity whose map file it can't download switches its
+    matchmaking off for RETRY_MATCHMAKING_MAP_DOWNLOAD_SECONDS (30 min). The map files are not ours."""
+    return json_response(request, {"entities": []}, "space-entities")
 
 
 def _ok(payload, how):

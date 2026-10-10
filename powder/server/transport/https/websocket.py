@@ -8,6 +8,7 @@ Open sockets are registered on the player's session, so services can push notifi
 from __future__ import annotations
 
 import logging
+import secrets
 import uuid
 
 from aiohttp import WSMsgType, web
@@ -36,9 +37,13 @@ async def websocket(request: web.Request) -> web.StreamResponse:
     _, ticket = parse_authorization(request.headers.get("Authorization"))
     session = services.accounts.session_for_ticket(ticket, client_ip(request))
     connection_id = str(uuid.uuid4())
+    # contactUrl is where the client PUTs which notification types it wants (its JobUpdateConnection), as
+    # Ubisoft's: https://public-im-.../v2/connections/<node>/<port>/<connection id>/notifications (answered
+    # by routes_profile). A wss:// address there fails in the game ("Unsupported protocol").
+    contact = f"https://public-im-ubiservices.ubi.com/v2/connections/{secrets.token_hex(9)[:17]}/8180/" \
+              f"{connection_id}/notifications"
     await ws.send_json({"notificationType": "US_CONNECTION_ESTABLISHED",
-                        "content": {"connectionId": connection_id,
-                                    "contactUrl": "wss://public-ws-ubiservices.ubi.com"},
+                        "content": {"connectionId": connection_id, "contactUrl": contact},
                         "datePosted": iso_now()})
     if session is not None:
         session.websockets.add(ws)

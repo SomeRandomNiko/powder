@@ -143,6 +143,13 @@ async def test_websocket_hello_and_server_push(client, services):
                                           "Authorization": f"Ubi_v1 t={s['ticket']}"})
     hello = json.loads((await ws.receive()).data)
     assert hello["notificationType"] == "US_CONNECTION_ESTABLISHED" and hello["content"]["connectionId"]
+    # the client PUTs its notification types to contactUrl: an https address we answer
+    contact = hello["content"]["contactUrl"]
+    assert contact.startswith("https://public-im-ubiservices.ubi.com/v2/connections/")
+    assert contact.endswith(f"/{hello['content']['connectionId']}/notifications")
+    r = await client.put(contact.split(".com", 1)[1], headers={"Host": "public-im-ubiservices.ubi.com"},
+                         json={"notificationType": ["STEEP_SPECTATOR"]})
+    assert r.status == 200 and await r.json() == {}
     assert await services.sessions.push_ws(s["profileId"], "TEST_NOTIFICATION", {"x": 1}) == 1
     pushed = json.loads((await ws.receive()).data)
     assert pushed["notificationType"] == "TEST_NOTIFICATION"
@@ -191,12 +198,8 @@ async def test_connect_achievement_view(client, services):
     assert (await r.json())["data"]["game"]["viewer"]["meta"]["achievements"]["nodes"] == []
 
 
-async def test_matchmaking_map_for_the_world(client):
-    """Without a matchmaking map the game never opens a match ticket."""
+async def test_no_matchmaking_map(client):
+    """An empty list lets the game matchmake without a map (a map entity it can't download disables it)."""
     r = await client.get(f"/v2/spaces/{SPACE_ID}/entities?type=TITLE_MATCHMAKING_MAP&tags=WORLD_10af88fa9e4"
                          "&offset=0&limit=10", headers=UBI)
-    (entity,) = (await r.json())["entities"]
-    assert entity["type"] == "TITLE_MATCHMAKING_MAP" and entity["tags"] == ["WORLD_10af88fa9e4"]
-    assert entity["obj"] == {"version": 3} and entity["spaceId"] == SPACE_ID
-    r = await client.get(f"/v2/spaces/{SPACE_ID}/entities?tags=TRAIL,ACTIVATED&offset=0&limit=20", headers=UBI)
-    assert (await r.json())["entities"] == []
+    assert r.status == 200 and (await r.json())["entities"] == []
