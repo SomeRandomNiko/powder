@@ -9,8 +9,9 @@ import pytest
 from cryptography.hazmat.primitives.asymmetric import ec
 
 from powder.server.core.identity import Player
-from powder.server.services.matchmaking import (CODE_BECOME_HOST, CODE_HOST, CODE_JOIN, CODE_MIGRATE_DONE,
-                                                JOINED, PENDING, MatchmakingService, reachable_urls)
+from powder.server.services.matchmaking import (CODE_BECOME_HOST, CODE_DIRECT_JOIN, CODE_DIRECT_JOIN_FAILED,
+                                                CODE_HOST, CODE_JOIN, CODE_MIGRATE_DONE, JOINED, PENDING,
+                                                MatchmakingService, reachable_urls)
 from powder.server.transport.nex import rmc_codec as rmc
 from powder.server.transport.nex import secure
 from powder.server.transport.nex import server as nex_server
@@ -171,17 +172,32 @@ def test_code_2_is_sent_again_until_the_joiner_reports(mm):
 
 
 def test_join_group_on_a_friend(mm):
-    """JoinPlayer: into the friend's group session, told where with code 2 (session type 1)."""
+    """JoinPlayer: into the friend's group session, told where with code 4 (session type 1)."""
     group_b = mm.create_session_with_reserved_id(B, mm.reserve_session_id(B), 1, {}, urls("192.0.2.20"), 4)
     own_a = mm.create_session_with_reserved_id(A, mm.reserve_session_id(A), 1, {}, urls("192.0.2.10"), 4)
     assert mm.join_player(A, B.upper())
     pid, code, params = mm.sent[-1]
-    assert (pid, code, params["session_id"], params["session_type"]) == (A, CODE_JOIN, group_b, 1)
+    assert (pid, code, params["session_id"], params["session_type"]) == (A, CODE_DIRECT_JOIN, group_b, 1)
+    assert "ticket_ids" not in params                       # as recorded: code 4 has no ticket fields
     assert json.loads(params["host_station_urls"]) == urls("192.0.2.20") and params["host_profile_id"] == B
     assert mm.get_session(own_a) is None and mm.get_session(group_b).members[A].state == PENDING
     mm.report_join_success(A, group_b)
     assert mm.get_session(group_b).members[A].state == JOINED
     assert not mm.join_player(B, C)                         # C has no group session: the call fails
+    mm.remove_members(B, group_b, [A.upper()])              # the host takes A out again
+    assert A not in mm.get_session(group_b).members
+
+
+def test_accepting_an_invite_joins_the_inviters_group(mm):
+    """JoinSession with the session id from the invite: code 4, or code 5 when that group is gone."""
+    group_a = mm.create_session_with_reserved_id(A, mm.reserve_session_id(A), 1, {}, urls("192.0.2.10"), 4)
+    mm.create_session_with_reserved_id(B, mm.reserve_session_id(B), 1, {}, urls("192.0.2.20"), 4)
+    mm.join_session(B, group_a)
+    pid, code, params = mm.sent[-1]
+    assert (pid, code, params["session_id"], params["host_profile_id"]) == (B, CODE_DIRECT_JOIN, group_a, A)
+    mm.leave(A, group_a)                                    # the inviter's group ends
+    mm.join_session(C, group_a)
+    assert mm.sent[-1] == (C, CODE_DIRECT_JOIN_FAILED, {"session_id": group_a, "session_type": 1})
 
 
 def test_join_player_params():

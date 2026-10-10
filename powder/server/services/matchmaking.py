@@ -39,6 +39,8 @@ log = logging.getLogger("powder.matchmaking")
 SESSION_GROUP, SESSION_WORLD = 1, 2                  # session types: the player's own group, the shared world
 PENDING, JOINED = 1, 2                               # member states (GetSession)
 CODE_HOST, CODE_JOIN, CODE_MIGRATE_DONE, CODE_BECOME_HOST = 1, 2, 10, 12
+CODE_DIRECT_JOIN, CODE_DIRECT_JOIN_FAILED = 4, 5   # answers to JoinSession / JoinPlayer (recorded; the game's
+                                                   # onDirectJoinSucceed / onDirectJoinFailed, then it retries)
 RESEND_AFTER_S = 15.0             # code 1 / 2 again when the game did not react within this time
 MAX_ASKS = 3                      # tries per code 1 / 2; then the session is given up / the member left alone
 ATTR_ORDER = ("worldcell", "language", "country", "connectivity_nat", "version", "world_id")
@@ -260,14 +262,47 @@ class MatchmakingService:
                     self.sessions[sid].host if sid in self.sessions else "?", reason)
         self.leave(profile_id, sid)
 
+    def _send_direct_join(self, s: Session, m: Member) -> None:
+        """Code 4: where the session's host is (recorded after JoinSession; the game then connects to the host
+        and reports ReportJoinSuccess)."""
+        log.info("session %d: %s joins host %s directly", s.id, m.profile_id, s.host)
+        self.notify(m.profile_id, CODE_DIRECT_JOIN, {
+            "session_type": s.type, "session_id": s.id, "host_profile_id": s.host,
+            "host_station_urls": json.dumps(reachable_urls(s.host_urls))})
+
+    def _join_directly(self, profile_id: str, s: Session) -> None:
+        if s.type == SESSION_GROUP:                      # one group at a time
+            for sid in [sid for sid, other in self.sessions.items()
+                        if other.type == SESSION_GROUP and sid != s.id and profile_id in other.members]:
+                self.leave(profile_id, sid)
+        m = s.members.get(profile_id) or s.members.setdefault(profile_id, Member(profile_id, PENDING))
+        self._send_direct_join(s, m)
+
     def join_session(self, profile_id: str, sid: int) -> None:
+        """JoinSession, e.g. accepting a friend's invite (the session id came in the invite): code 4 with the
+        host's URLs, or code 5 when the session is gone, full or has no host yet (the game then gives up or
+        asks again)."""
         s = self.sessions.get(sid)
-        if s and profile_id not in s.members and s.free:
-            s.members[profile_id] = Member(profile_id, JOINED)
+        if s and s.host and s.host_urls and (profile_id in s.members or s.free):
+            self._join_directly(profile_id, s)
+            return
+        log.warning("JoinSession from %s: session %d %s", profile_id, sid,
+                    "does not exist" if s is None else "is full or has no host")
+        self.notify(profile_id, CODE_DIRECT_JOIN_FAILED, {"session_id": sid,
+                                                         "session_type": s.type if s else SESSION_GROUP})
+
+    def remove_members(self, profile_id: str, sid: int, members: list[str]) -> None:
+        """RemoveMembers: the host takes players out of its session."""
+        s = self.sessions.get(sid)
+        if s is None or s.host != profile_id:
+            return
+        for pid in members:
+            if pid.lower() != profile_id:
+                self.leave(pid.lower(), sid)
 
     def join_player(self, profile_id: str, target: str) -> bool:
         """JoinPlayer ("Join group" on a friend): into the friend's group session (type 1, the one it hosts),
-        then code 2 with its host's URLs, as for a matched session. False: the friend has no such session."""
+        then code 4 with its host's URLs. False: the friend has no such session."""
         target = target.lower()
         s = next((s for s in self.sessions.values()
                   if s.type == SESSION_GROUP and s.host == target and s.host_urls), None)
@@ -275,13 +310,8 @@ class MatchmakingService:
             log.warning("JoinPlayer from %s: %s has no group session to join%s", profile_id, target,
                         "" if s is None else " (full)")
             return False
-        for sid in [sid for sid, other in self.sessions.items()     # one group at a time
-                    if other.type == SESSION_GROUP and sid != s.id and profile_id in other.members]:
-            self.leave(profile_id, sid)
-        m = s.members.get(profile_id) or s.members.setdefault(profile_id, Member(profile_id, PENDING))
-        m.asked = 0
         log.info("session %d: %s joins %s's group", s.id, profile_id, target)
-        self._send_join(s, m)
+        self._join_directly(profile_id, s)
         return True
 
     def update_session(self, profile_id: str, sid: int, attrs: dict) -> None:

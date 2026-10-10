@@ -138,9 +138,16 @@ def migrate_host(ctx, r: Reader) -> bytes:
     return b""
 
 
+def remove_members(ctx, r: Reader) -> bytes:
+    """params: type map, u32 session id, List<GUID> players (the host removes them)."""
+    sid = _sid(r)
+    _mm(ctx).remove_members(_pid(ctx), sid, [str(r.guid()) for _ in range(r.u32())])
+    return b""
+
+
 def join_player(ctx, r: Reader) -> bytes:
     """params: type map, GUID the friend ("Join group" in the social tab). No outputs (the game's reply
-    dispatcher reads none); the game is then told where to go with code 2 (services/matchmaking.py)."""
+    dispatcher reads none); the game is then told where to go with code 4 (services/matchmaking.py)."""
     read_type_map(r)
     if not _mm(ctx).join_player(_pid(ctx), str(r.guid())):
         raise RmcError("Core", 2)                       # the game shows "join has failed"
@@ -163,6 +170,7 @@ HANDLERS = {f"MatchmakingProtocol::{name}_V1": fn for name, fn in {
     "GetSession": get_session,
     "JoinSession": join_session,
     "JoinPlayer": join_player,
+    "RemoveMembers": remove_members,
     "LeaveSession": leave_session,
     "ReportHostSuccess": report_host_success,
     "ReportJoinSuccess": report_join_success,
