@@ -9,12 +9,14 @@ import logging
 import re
 import secrets
 import time
+import uuid
 
 from aiohttp import web
 
 from ...constants import APP_ID, CONNECT_SPACE_ID, SPACE_ID
 from ...core.sessions import ubi_shaped_ticket
 from ...core.identity import LoginRequest, parse_authorization
+from ...services import cloudsaves
 from ...services.accounts import AuthError, basic_credentials
 from ...services.economy import EconomyError
 from ...util import iso_now
@@ -261,17 +263,79 @@ async def internet_check(request: web.Request) -> web.Response:
     return web.Response(text="I AM ALIVE!", content_type="text/plain")
 
 
+def _cloud_owner(request: web.Request) -> str:
+    """Whose cloud save: the signed-in player (Connect's ticket), else the profile in the path, else the
+    default player (a server without accounts)."""
+    return (_owner(request) or request.match_info.get("profile_id")
+            or request.app[SERVICES].default_player_id()).lower()
+
+
 async def get_entities_v1(request: web.Request) -> web.StreamResponse:
     """GET /v1/profiles/{pid}/entities?name=upcCloudSaveUplayId_<product>: Ubisoft Connect's cloud-save
-    metadata. Saves are not stored on this server (yet), so there is no cloud save: replaying the
-    recorded metadata would make Connect offer to "restore" a save it can never download."""
-    if request.query.get("name", "").startswith("upcCloudSave"):
-        return json_response(request, {"entities": []}, "no-cloud-save")
-    return json_response(request, {"entities": []}, "entities-v1")
+    entity (services/cloudsaves.py), only when its files are all stored; other names: none."""
+    m = cloudsaves.NAME.match(request.query.get("name", ""))
+    owner = _cloud_owner(request)
+    if not m or owner != request.match_info["profile_id"].lower():
+        return json_response(request, {"entities": []}, "entities-v1")
+    e = request.app[SERVICES].cloudsaves.offered(owner, int(m.group(1)))
+    return json_response(request, {"entities": [e] if e else []}, "cloud-save" if e else "no-cloud-save")
+
+
+async def write_cloud_entity(request: web.Request) -> web.Response:
+    """PUT /v1/profiles/entities/{entity_id} (Connect at game exit, before uploading the files) and
+    POST /v1/profiles/{pid}/entities (creating it; not recorded, so logged in full)."""
+    try:
+        body = await request.json()
+    except ValueError:
+        body = None
+    if not isinstance(body, dict) or not cloudsaves.NAME.match(str(body.get("name", ""))):
+        return json_response(request, {"errorCode": 1, "message": "not a cloud save", "httpCode": 400},
+                             "bad-request", 400)
+    owner = _cloud_owner(request)
+    services = request.app[SERVICES]
+    entity_id = request.match_info.get("entity_id")
+    slots = [(s.get("filename"), s.get("size")) for s in (body.get("obj") or {}).get("slots", []) if isinstance(s, dict)]
+    if entity_id is None:
+        log.info("cloud save entity created by %s: %s, slots %s", owner, body.get("name"), slots)
+        existing = services.cloudsaves.entity(owner, int(cloudsaves.NAME.match(body["name"]).group(1)))
+        entity_id = existing["entityId"] if existing else str(uuid.uuid4())
+    else:
+        existing = services.entities.get(entity_id)
+        if existing and existing.get("profileId") != owner:
+            return json_response(request, {"errorCode": 1, "message": "not your entity", "httpCode": 403},
+                                 "forbidden", 403)
+        if existing and body.get("revision") not in (None, existing.get("revision")):
+            log.warning("cloud save of %s: revision %s written over %s", owner, body.get("revision"),
+                        existing.get("revision"))
+        log.info("cloud save of %s updated: %s, slots %s", owner, body.get("name"), slots)
+    e = services.entities.put(entity_id, {**body, "type": cloudsaves.TYPE}, owner)
+    return json_response(request, e, f"cloud-save-written(rev {e['revision']})")
+
+
+async def cloud_save_file(request: web.Request) -> web.StreamResponse:
+    """The links Connect gets from the demux cloudsave_service: PUT uploads a slot, GET / HEAD download it."""
+    services = request.app[SERVICES]
+    try:
+        link = services.cloudsaves.resolve(request.query.get("t", ""), int(request.match_info["product"]),
+                                           request.match_info["slot"])
+        if request.method == "PUT":
+            services.cloudsaves.store(link, await request.read(), request.headers.get("Content-MD5"))
+            request[HOW] = "cloud-save-upload"
+            return web.Response(status=200)
+        data = services.cloudsaves.read(link)
+    except cloudsaves.CloudSaveError as e:
+        log.warning("cloud save file %s/%s: %s", request.match_info["product"], request.match_info["slot"], e)
+        return web.Response(status=403 if "link" in str(e) else 400 if "damaged" in str(e) else 404)
+    request[HOW] = "cloud-save-download"
+    return web.Response(body=b"" if request.method == "HEAD" else data, content_type="application/octet-stream",
+                        headers={"Content-Length": str(len(data))} if request.method == "HEAD" else None)
 
 
 def add_routes(app: web.Application) -> None:
     app.router.add_get("/v1/profiles/{profile_id}/entities", get_entities_v1)
+    app.router.add_post("/v1/profiles/{profile_id}/entities", write_cloud_entity)
+    app.router.add_put("/v1/profiles/entities/{entity_id}", write_cloud_entity)
+    app.router.add_route("*", "/_powder/cloudsaves/{product}/{slot}", cloud_save_file)
     app.router.add_get(r"/{prefix:.*}test_internet.txt", internet_check)
     app.router.add_post("/v3/profiles/sessions", create_session)
     app.router.add_get("/v1/spaces/{space}/sandboxes/{sandbox}/rendezvous/configuration", rendezvous_configuration)

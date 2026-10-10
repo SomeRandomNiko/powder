@@ -301,8 +301,10 @@ offline mode. So the server also stands in for what Connect needs:
   sessions, achievements and ownership tokens (`transport/demux/`). It shares port 443 with HTTPS: the
   listener routes by the requested hostname (`transport/tls_router.py`).
 - **Internet check** and CORS for Connect's web UI.
-- **Cloud saves** are switched off in what Connect is told about the games (`connect_cloud_saves`), so it
-  never prompts to sync.
+- **Cloud saves** (`connect_cloud_saves`): Connect uploads the game's own save files at game exit and gets
+  them back at the start on another PC (`services/cloudsaves.py`, files in `data/cloudsaves/`). A cloud save
+  is only offered while all its files are there; `powder-server admin cloud-saves [PLAYER] --delete`
+  removes one.
 - **Certificates**: Connect checks them through Windows, so the server generates a local CA in
   `data/tls/` ("Powder (Steep) local CA" in Windows' certificate list), restricted by name constraints to
   `ubi.com` / `ubisoft.com` / loopback, so it cannot vouch for any other website. The launcher installs it;

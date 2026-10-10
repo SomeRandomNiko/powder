@@ -15,8 +15,9 @@ class ServerConfig:
     nex_port: int = 6005
     storm_port: int = 11000             # Storm (UDP): NAT detection on this port to +3, traversal on +5
     crl_port: int = 80                  # plain HTTP: the local CA's revocation list Ubisoft Connect checks
-    connect_cloud_saves: bool = False   # False: tell Ubisoft Connect the games have no cloud saves, so it
-                                        # never tries (and fails) to sync them at launch and exit
+    connect_cloud_saves: bool = False   # True: Ubisoft Connect keeps the game's save files on this server
+                                        # (data/cloudsaves/), so they follow the account to another PC.
+                                        # False: Connect is told the games have no cloud saves
     data_dir: Path = Path("data")       # powder.db, logs/, TLS cert, NEX key  (relative to the config file)
     gamedata_dir: Path = Path("gamedata")       # game-data pack (store catalogue, configs), see gamedata/
     use_gamedata: bool = True           # False: run as without a pack even if one is installed

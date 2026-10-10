@@ -8,7 +8,8 @@ https_port = 443           # HTTPS for the game and Ubisoft Connect, incl. Conne
 nex_port = 6005
 storm_port = 11000          # peer-to-peer helpers (UDP): NAT detection 11000-11003, traversal 11005
 crl_port = 80               # revocation list for the local CA (http://public-ubiservices.ubi.com/powder-ca.crl)
-connect_cloud_saves = false # false: Ubisoft Connect treats games as having no cloud saves (no sync prompts)
+connect_cloud_saves = false # true: Ubisoft Connect keeps the game's save files (tutorial, story, settings) on
+                            # this server, so they follow your account to another PC
 data_dir = "data"           # database, logs, uploaded game logs, generated TLS cert + NEX signing key
 gamedata_dir = "gamedata"   # the game-data pack (optional; not in the repository, see README)
 use_gamedata = true         # false: ignore an installed pack (the launcher's checkbox uses `run --no-gamedata`)

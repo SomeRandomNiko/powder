@@ -8,6 +8,7 @@
   powder-server admin events [PLAYER] [-n N]        stat uploads from the game (XP, medals, unlocks)
   powder-server admin scores [PLAYER]               personal best per challenge
   powder-server admin entities [PLAYER]             profile entities (rider card, favorites)
+  powder-server admin cloud-saves [PLAYER] [--delete]   Ubisoft Connect cloud saves (--delete: remove them)
   powder-server admin achievements [PLAYER] [--all] earned achievements (--all: also the open ones)
   powder-server admin import RECORDINGS_DIR [--replace]   your own recorded progress -> database (once)
   powder-server admin reset [PLAYER]                start over as a new player
@@ -60,6 +61,10 @@ def add_parser(sub) -> None:
     q.add_argument("player", nargs="?")
     q = a.add_parser("entities", help="profile entities (rider card, favorites)")
     q.add_argument("player", nargs="?")
+    q = a.add_parser("cloud-saves", help="Ubisoft Connect cloud saves (the game's own save files)")
+    q.add_argument("player", nargs="?")
+    q.add_argument("--delete", action="store_true", help="remove the player's cloud saves (Connect then keeps "
+                                                          "each PC's local files)")
     q = a.add_parser("achievements", help="earned achievements (as Ubisoft Connect reported them)")
     q.add_argument("player", nargs="?")
     q.add_argument("--all", action="store_true", help="also list the ones not earned yet")
@@ -197,6 +202,19 @@ def run(args, config: Config) -> int:
     elif cmd == "events":
         for e in s.repos.stat_events.recent(pid, args.n):
             print(f"{e['ts']}  {e['name']:32s} {e['fields_json']}")
+    elif cmd == "cloud-saves":
+        if args.delete:
+            print(f"removed {s.cloudsaves.delete(pid)} cloud save(s) of {pid}")
+        else:
+            items = s.cloudsaves.all(None if getattr(args, "player", None) is None else pid)
+            for item in items:
+                e, obj = item["entity"], item["entity"].get("obj") or {}
+                slots = ", ".join(f"{x.get('filename')} ({x.get('size')} B)" for x in obj.get("slots", [])
+                                  if isinstance(x, dict))
+                print(f"{item['profile_id']}  product {item['product']}  revision {e.get('revision')}  "
+                      f"{e.get('lastModified')}  {'complete' if item['complete'] else 'INCOMPLETE'}  {slots}")
+            if not items:
+                print("no cloud saves")
     elif cmd == "scores":
         for e in s.repos.challenge_scores.all(pid):
             print(f"{e['challenge_id']:48s} {e['best_score']:>12g}  ({e['direction']}, {e['updated']})")

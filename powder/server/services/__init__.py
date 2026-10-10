@@ -22,6 +22,7 @@ from ..fixtures.rmc import RmcFixtures
 from ..gamedata import pack
 from .accounts import AccountService
 from .channels import ChannelService
+from .cloudsaves import CloudSaveService
 from .economy import EconomyService
 from .entities import EntityService
 from .matchmaking import MatchmakingService
@@ -142,6 +143,7 @@ class Services:
         self.entities = EntityService(self.repos)
         self.matchmaking = MatchmakingService(self._push_matchmaking)
         self.channels = ChannelService(self._push_ws)
+        self.cloudsaves = CloudSaveService(self.repos, self.entities, self.config.data_dir)
         self.login_failures = FailureLimiter()          # per client address: sign-ins and the account API
 
     def _push_matchmaking(self, profile_id: str, code: int, params: dict) -> None:

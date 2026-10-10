@@ -5,6 +5,7 @@
   ownership_service Steam proof-of-purchase registration -> success; ownership token for a product ->
                     a fresh opaque token (Connect only passes it on; this server is the only validator)
   ach_frontend      earned achievements per player: stored when Connect writes them, returned when it reads
+  cloudsave_service links for uploading the game's save files to this server (services/cloudsaves.py)
 Owned games (ownership_service initialize) are in ownership.py.
 """
 from __future__ import annotations
@@ -13,6 +14,7 @@ import base64
 import logging
 import secrets
 
+from ...services.cloudsaves import CloudSaveError
 from ...services.friends import friends_of
 from . import pb
 from .services import ServiceContext, ServiceRequest, handler, make_reply
@@ -40,6 +42,36 @@ def friends_initialize(ctx: ServiceContext, req: ServiceRequest) -> bytes:
 
 handler("friends_service", 13)(_success(13))
 handler("friends_service", 19)(_success(19))
+
+# cloud saves: 2 = upload links {2 product, 3 1, 4*: {1 slot, 2: {1 content length, 2 content-md5 (base64)}}}
+#   -> reply 2 {1 result, 2*: {1 "Content-Length: N\nContent-MD5: x\n" (headers to send), 2 URL}} (recorded;
+#   the URL was a presigned S3 PUT, here a link on this server). Downloading was not recorded: other kinds
+#   are logged as DEMUX UNHANDLED with their layout.
+CLOUD_FILES = "https://public-ubiservices.ubi.com/_powder/cloudsaves"
+
+
+@handler("cloudsave_service", 2)
+def cloudsave_upload_links(ctx: ServiceContext, req: ServiceRequest) -> bytes:
+    body = pb.try_decode(req.body) if isinstance(req.body, bytes) else None
+    product = pb.first(body, 2) if body else None
+    if not ctx.profile_id or not isinstance(product, int):
+        return make_reply(req, 2, [(1, 0)])
+    entries = []
+    for _, raw, _ in [f for f in body if f[0] == 4]:
+        slot_msg = pb.try_decode(raw) or []
+        slot, meta = pb.text(slot_msg, 1), pb.try_decode(pb.first(slot_msg, 2, b"")) or []
+        length, md5 = pb.first(meta, 1), pb.text(meta, 2)
+        try:
+            token = ctx.services.cloudsaves.link(ctx.profile_id, product, slot, md5 or None)
+        except CloudSaveError as e:
+            log.warning("cloud save upload links for %s: %s", ctx.profile_id, e)
+            return make_reply(req, 2, [(1, 0)])
+        headers = (f"Content-Length: {length}\n" if isinstance(length, int) else "") + \
+            (f"Content-MD5: {md5}\n" if md5 else "")
+        entries.append((2, [(1, headers), (2, f"{CLOUD_FILES}/{product}/{slot}?t={token}")]))
+    log.info("cloud save of %s: %d upload link(s) for product %d", ctx.profile_id, len(entries), product)
+    return make_reply(req, 2, [(1, 1), *entries])
+
 
 # playtime: 2 = playtime report (reply 2: {1 result})
 @handler("playtime_service", 2)
