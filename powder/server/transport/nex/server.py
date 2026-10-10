@@ -136,9 +136,16 @@ class NexServer(asyncio.DatagramProtocol):
         if self.conns.get(c.addr) is c:
             del self.conns[c.addr]
         s = c.session
-        if s is not None and getattr(s, "nex", None) is c:
-            s.nex = None
-            self.services.matchmaking.on_disconnect(s.profile_id)   # the game is gone: out of its sessions
+        if s is not None:
+            # a later login of the same player (e.g. Ubisoft Connect refreshing its ticket) carries this
+            # connection over to its own session object: clear it there too
+            gone = False
+            for sess in {s, self.services.sessions.for_player(s.profile_id)} - {None}:
+                if getattr(sess, "nex", None) is c:
+                    sess.nex = None
+                    gone = True
+            if gone:
+                self.services.matchmaking.on_disconnect(s.profile_id)   # the game is gone: out of its sessions
         log.info("%s:%d connection closed (%s)", c.addr[0], c.addr[1], why)
 
     async def run_timers(self) -> None:

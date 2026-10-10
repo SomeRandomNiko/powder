@@ -138,7 +138,7 @@ async def two_games(services):
         client.call("LoginProtocol", 1, "LoginProtocol::LoginWithToken_V1",
                     rmc.Writer().u32(0).string(session.ticket).bytes())
         await client.read()
-        client.ct = ct
+        client.ct, client.server = ct, server
         games.append(client)
     yield games
     for g in games:
@@ -205,6 +205,19 @@ async def test_two_games_meet_over_nex(services, two_games):
     r = rmc.Reader((await bob.read()).body)
     r.u32(), r.u32(), r.u64(), rmc.read_variant_map(r)
     assert str(r.guid()) == A and r.u32() == JOINED and rmc.read_strings(r) == urls("192.0.2.10")
+
+
+async def test_a_closed_game_connection_leaves_matchmaking(services, two_games):
+    """Also when a later login (Ubisoft Connect refreshing) carried the connection over to a newer session."""
+    alice, _ = two_games
+    await open_ticket(alice, 10)
+    assert any(t.profile_id == A for t in services.matchmaking.tickets.values())
+    services.sessions.issue(Player(A, A, "Alice"), "127.0.0.1", app_id="connect-part")    # a re-login
+    conn = services.sessions.for_player(A).nex
+    assert conn is not None
+    alice.server.drop(conn, "test")
+    assert services.sessions.for_player(A).nex is None
+    assert not any(t.profile_id == A for t in services.matchmaking.tickets.values())
 
 
 def test_register_from_the_servers_own_pc_gives_its_lan_address(services):
