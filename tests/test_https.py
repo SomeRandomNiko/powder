@@ -224,6 +224,19 @@ async def test_a_notification_reaches_the_other_players_game(client, services):
     assert n["source"]["profileId"] == services.default_player_id()
 
 
+async def test_game_invites_are_refused_chat_channels_stay(client, services):
+    """Invites can't be accepted (Connect's pages are Ubisoft's): refused, so the inviting game reports it."""
+    guest = services.accounts.register("guest@example.com", "correct horse", "Guest")
+    space = "c0539e9c-90ab-4af8-a2d6-ef7b3883f430"
+    host = {"Host": "channel-service.upc.ubi.com"}
+    dm = await (await client.post(f"/v1/spaces/{space}/channels", headers=host,
+                                  json={"channel": {"type": "DM"}, "members": [guest.profile_id]})).json()
+    r = await client.post(f"/v1/spaces/{space}/channels/{dm['id']}/messages", headers=host,
+                          json={"type": "GAME_INVITE", "textMessage": "e30="})
+    assert r.status == 403 and (await r.json())["httpCode"] == 403
+    assert services.channels.messages(guest.profile_id, dm["id"]) == []         # nothing delivered
+
+
 async def test_connect_achievement_view(client, services):
     """Ubisoft Connect's UI asks for achievements over GraphQL (batched): titles, icons and the player's
     unlocks come from the pack and the database."""

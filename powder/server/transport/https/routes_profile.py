@@ -330,6 +330,13 @@ async def channel_messages(request: web.Request) -> web.Response:
     if request.method == "POST":
         body = await _json_body(request)
         log.info("channel %s message from %s: %s", cid, _me(request), json.dumps(body)[:2000])
+        if body.get("type") == "GAME_INVITE":
+            # Accepting needs Ubisoft Connect's own pages (pop-up, chat), which can't be shown here: refuse,
+            # so the inviting game says the invite failed instead of nothing happening for the friend.
+            log.info("game invite from %s refused (invites can't be accepted on this server)", _me(request))
+            request[HOW] = "game-invite-refused"
+            return web.json_response({"errorCode": 1003, "httpCode": 403,
+                                      "message": "Game invites are not available on this server."}, status=403)
         message = channels.post(_me(request) or "", cid, body)
         if message is None:
             return web.json_response({"errorCode": 1, "message": "no such channel"}, status=404)
