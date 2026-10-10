@@ -5,7 +5,10 @@ NEX RMC message codec (Ubisoft's name-based variant). Reconstructed from the bin
   response: [u32 size][String protocol][u8 0][u8 1][u32 callID][String "Proto::Method_V1*"][outputs...]
   error   : [u32 size][String protocol][u8 0][u8 0][String errName][u16 code][u32 callID]
 
-String = [u16 len incl. NUL][bytes][NUL]. GUID = 16 bytes in Windows (bytes_le) order.
+String = [u16 len incl. NUL][bytes][NUL]. GUID = u32, u16, u16, then 4 x u16 (all little-endian): Windows
+order except that each byte pair of the last 8 bytes is swapped (_quazal_guid_order). With plain Windows
+order the game sees a different profile id, takes its player status for someone else's and treats the
+player as banned from matchmaking (found live, 2026-10-10).
 Many requests start their params with a type-version map: [u32 n] n x [String typeName][u16 version].
 `size` excludes itself (classic Quazal); parse() tolerates either.
 
@@ -24,6 +27,13 @@ from dataclasses import dataclass
 RESPONSE_SUFFIX = "*"
 
 
+def _quazal_guid_order(b: bytes) -> bytes:
+    """Quazal writes a GUID as u32, u16, u16 (like Windows) and then the last 8 bytes as four little-endian
+    u16s, so each byte pair there is swapped against Windows order (checked against Ubisoft's replies).
+    The same swap converts in both directions."""
+    return b[:8] + b"".join(b[i + 1:i + 2] + b[i:i + 1] for i in range(8, 16, 2))
+
+
 class Reader:
     def __init__(self, data: bytes):
         self.data, self.pos = data, 0
@@ -40,7 +50,7 @@ class Reader:
     def u32(self) -> int: return struct.unpack("<I", self.take(4))[0]
     def u64(self) -> int: return struct.unpack("<Q", self.take(8))[0]
     def bool(self) -> bool: return self.u8() != 0
-    def guid(self) -> uuid.UUID: return uuid.UUID(bytes_le=self.take(16))
+    def guid(self) -> uuid.UUID: return uuid.UUID(bytes_le=_quazal_guid_order(self.take(16)))
 
     def string(self) -> str:
         n = self.u16()
@@ -63,7 +73,7 @@ class Writer:
     def u32(self, v: int): self.buf += struct.pack("<I", v & 0xFFFFFFFF); return self
     def u64(self, v: int): self.buf += struct.pack("<Q", v & 0xFFFFFFFFFFFFFFFF); return self
     def bool(self, v: bool): return self.u8(1 if v else 0)
-    def guid(self, g: uuid.UUID): self.buf += g.bytes_le; return self
+    def guid(self, g: uuid.UUID): self.buf += _quazal_guid_order(g.bytes_le); return self
     def raw(self, b: bytes): self.buf += b; return self
 
     def string(self, s: str):

@@ -95,3 +95,13 @@ def test_quazal_datetime_packing():
     """Regression value: Quazal date-time packing of 2026-10-04 17:18:32 UTC."""
     import datetime
     assert rmc.quazal_datetime(datetime.datetime(2026, 10, 4, 17, 18, 32)) == 136005096608
+
+
+def test_guid_byte_order():
+    """u32, u16, u16 little-endian, then four little-endian u16s (as Ubisoft's server sends a profile id).
+    Windows order (bytes_le) made the game see another profile id and block matchmaking."""
+    import uuid
+    g = uuid.UUID("00112233-4455-6677-8899-aabbccddeeff")
+    raw = rmc.Writer().guid(g).bytes()
+    assert raw.hex() == "33221100" "5544" "7766" "9988" "bbaa" "ddcc" "ffee"
+    assert rmc.Reader(raw).guid() == g
