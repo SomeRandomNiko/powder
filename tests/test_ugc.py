@@ -38,6 +38,23 @@ async def test_a_photo_round_trip(client, services):
     assert (await client.get("/_powder/ugc/not-an-item", headers=OLYMPUS)).status == 404
 
 
+async def test_a_photo_as_the_game_uploads_it(client, services):
+    """Seen live: the JPEG comes inline (datas, base64); it is a file, never part of the listed item."""
+    import base64
+    r = await client.post("/ugc/v1/", headers=OLYMPUS, json={
+        "typeId": 2, "worldId": WORLD, "metadata": {"worldId": WORLD}, "tags": ["Ski", "Selfie"],
+        "datas": base64.b64encode(b"\xff\xd8JPEG").decode()})
+    item = await r.json()
+    assert "datas" not in item and item["tags"] == ["Ski", "Selfie"]
+    for url in item["links"]["urls"].values():                     # Data and Thumbnail: the photo
+        assert await (await client.get(url.split(".com", 1)[1], headers=OLYMPUS)).read() == b"\xff\xd8JPEG"
+    listed = await (await client.get(f"/ugc/v1/?algo=Steep&type_id=2&world_id={WORLD}", headers=OLYMPUS)).json()
+    assert "datas" not in listed[0]
+    assert (await client.delete(f"/ugc/v1/{item['id']}", headers=OLYMPUS)).status == 204
+    assert (await client.put(f"/ugc/v1/{item['id']}/hide", headers=OLYMPUS)).status == 204    # as the game does
+    assert (await client.get(item["links"]["urls"]["Data"].split(".com", 1)[1], headers=OLYMPUS)).status == 404
+
+
 async def test_a_saved_replay_gets_its_file_stored(client, services):
     """Saving a replay: an entity asking for extended storage gets a putUrl; reads get getUrl / headUrl."""
     ubi = {"Host": "public-ubiservices.ubi.com"}
