@@ -265,6 +265,25 @@ class MatchmakingService:
         if s and profile_id not in s.members and s.free:
             s.members[profile_id] = Member(profile_id, JOINED)
 
+    def join_player(self, profile_id: str, target: str) -> bool:
+        """JoinPlayer ("Join group" on a friend): into the friend's group session (type 1, the one it hosts),
+        then code 2 with its host's URLs, as for a matched session. False: the friend has no such session."""
+        target = target.lower()
+        s = next((s for s in self.sessions.values()
+                  if s.type == SESSION_GROUP and s.host == target and s.host_urls), None)
+        if s is None or (profile_id not in s.members and not s.free):
+            log.warning("JoinPlayer from %s: %s has no group session to join%s", profile_id, target,
+                        "" if s is None else " (full)")
+            return False
+        for sid in [sid for sid, other in self.sessions.items()     # one group at a time
+                    if other.type == SESSION_GROUP and sid != s.id and profile_id in other.members]:
+            self.leave(profile_id, sid)
+        m = s.members.get(profile_id) or s.members.setdefault(profile_id, Member(profile_id, PENDING))
+        m.asked = 0
+        log.info("session %d: %s joins %s's group", s.id, profile_id, target)
+        self._send_join(s, m)
+        return True
+
     def update_session(self, profile_id: str, sid: int, attrs: dict) -> None:
         s = self.sessions.get(sid)
         if s and s.host == profile_id:

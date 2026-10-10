@@ -9,7 +9,7 @@ import datetime
 import uuid
 
 from ....services.matchmaking import SESSION_WORLD
-from ..errors import Fallthrough
+from ..errors import Fallthrough, RmcError
 from ..rmc_codec import (V_INT64, Reader, Writer, quazal_datetime, read_strings, read_type_map,
                          read_variant_map, write_variant)
 
@@ -138,6 +138,15 @@ def migrate_host(ctx, r: Reader) -> bytes:
     return b""
 
 
+def join_player(ctx, r: Reader) -> bytes:
+    """params: type map, GUID the friend ("Join group" in the social tab). No outputs (the game's reply
+    dispatcher reads none); the game is then told where to go with code 2 (services/matchmaking.py)."""
+    read_type_map(r)
+    if not _mm(ctx).join_player(_pid(ctx), str(r.guid())):
+        raise RmcError("Core", 2)                       # the game shows "join has failed"
+    return b""
+
+
 def update_session(ctx, r: Reader) -> bytes:
     """params: type map, u32 session id, Map attributes."""
     sid = _sid(r)
@@ -153,6 +162,7 @@ HANDLERS = {f"MatchmakingProtocol::{name}_V1": fn for name, fn in {
     "CancelAllTicket": cancel_all_ticket,
     "GetSession": get_session,
     "JoinSession": join_session,
+    "JoinPlayer": join_player,
     "LeaveSession": leave_session,
     "ReportHostSuccess": report_host_success,
     "ReportJoinSuccess": report_join_success,

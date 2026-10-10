@@ -3,6 +3,7 @@ import asyncio
 import base64
 import json
 import uuid
+from types import SimpleNamespace
 
 import pytest
 from cryptography.hazmat.primitives.asymmetric import ec
@@ -169,6 +170,29 @@ def test_code_2_is_sent_again_until_the_joiner_reports(mm):
     assert len(mm.sent) == 3                                # joined: nothing more
 
 
+def test_join_group_on_a_friend(mm):
+    """JoinPlayer: into the friend's group session, told where with code 2 (session type 1)."""
+    group_b = mm.create_session_with_reserved_id(B, mm.reserve_session_id(B), 1, {}, urls("192.0.2.20"), 4)
+    own_a = mm.create_session_with_reserved_id(A, mm.reserve_session_id(A), 1, {}, urls("192.0.2.10"), 4)
+    assert mm.join_player(A, B.upper())
+    pid, code, params = mm.sent[-1]
+    assert (pid, code, params["session_id"], params["session_type"]) == (A, CODE_JOIN, group_b, 1)
+    assert json.loads(params["host_station_urls"]) == urls("192.0.2.20") and params["host_profile_id"] == B
+    assert mm.get_session(own_a) is None and mm.get_session(group_b).members[A].state == PENDING
+    mm.report_join_success(A, group_b)
+    assert mm.get_session(group_b).members[A].state == JOINED
+    assert not mm.join_player(B, C)                         # C has no group session: the call fails
+
+
+def test_join_player_params():
+    from powder.server.transport.nex.handlers.matchmaking import join_player
+    calls = []
+    ctx = SimpleNamespace(profile_id=A, services=SimpleNamespace(
+        matchmaking=SimpleNamespace(join_player=lambda pid, target: calls.append((pid, target)) or True)))
+    params = rmc.Writer().u32(0).guid(uuid.UUID(B)).bytes()
+    assert len(params) == 20 and join_player(ctx, rmc.Reader(params)) == b"" and calls == [(A, B)]
+
+
 def test_reachable_urls():
     assert reachable_urls(urls("127.0.0.1") + urls("192.0.2.5")) == urls("192.0.2.5")
     assert reachable_urls(urls("127.0.0.1")) == urls("127.0.0.1")
@@ -286,7 +310,6 @@ async def test_a_closed_game_connection_leaves_matchmaking(services, two_games):
 def test_register_from_the_servers_own_pc_gives_its_lan_address(services):
     """The host's own game connects from 127.0.0.1; other PCs must get an address they can reach."""
     import dataclasses
-    from types import SimpleNamespace
     from powder.server.transport.nex.handlers.login import register
     services.config = dataclasses.replace(services.config, server=dataclasses.replace(
         services.config.server, public_host="192.0.2.10"))
