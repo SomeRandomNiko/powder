@@ -173,3 +173,32 @@ async def test_passwords_never_logged(client, services, caplog):
                                                          "new_password": "brand new secret"})
     assert PASSWORD not in caplog.text and "wrong password" not in caplog.text
     assert "brand new secret" not in caplog.text
+
+
+def test_resetting_a_player_keeps_its_account(services, player):
+    acc = services.accounts.register("host@example.com", PASSWORD, "")
+    services.reset(acc.profile_id)
+    assert services.accounts.authenticate("host@example.com", PASSWORD).profile_id == acc.profile_id
+    assert services.repos.players.get(acc.profile_id).name == syn.PLAYER_NAME and services.accounts.required
+
+
+async def test_signing_in_to_ones_own_account_does_not_reset_the_guess_count(client, services):
+    await register(client)
+    await register(client, email="attacker@example.com", name="Attacker")
+    services.login_failures.max_failures = 3
+    for _ in range(2):
+        await connect_login(client, basic("rider@example.com", "wrong password"))
+        assert (await connect_login(client, basic("attacker@example.com", PASSWORD))).status == 200
+    await connect_login(client, basic("rider@example.com", "wrong password"))
+    r = await connect_login(client, basic("rider@example.com", PASSWORD))
+    assert r.status == 401 and "Too many" in (await r.json())["message"]
+
+
+async def test_empty_game_credentials_are_not_counted_as_guesses(client, services):
+    await register(client)
+    services.login_failures.max_failures = 2
+    empty = "Basic " + base64.b64encode(b":").decode()
+    for _ in range(5):                                       # the game without a Connect session
+        r = await client.post("/v3/profiles/sessions", json={}, headers={**UBI, "Authorization": empty})
+        assert r.status == 401
+    assert (await connect_login(client, basic("rider@example.com", PASSWORD))).status == 200

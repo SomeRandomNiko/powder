@@ -19,7 +19,10 @@ def _mm(ctx):
 
 
 def _pid(ctx) -> str:
-    return ctx.profile_id or ""
+    """The calling player; a call before LoginWithToken is not ours to answer."""
+    if not ctx.profile_id:
+        raise Fallthrough()
+    return ctx.profile_id
 
 
 def reserve_session_id(ctx, r: Reader) -> bytes:

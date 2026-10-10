@@ -29,10 +29,10 @@ def urls(host: str, port: int = 3074) -> list[str]:
     return [f"prudp:/address={host};port={port};type=2{tail}", f"prudp:/address={host};port={port};type=1{tail}"]
 
 
-def make_mm(min_ticket_age=0.0):
+def make_mm():
     sent, now = [], [1000.0]
     service = MatchmakingService(lambda pid, code, params: sent.append((pid, code, params)),
-                                 clock=lambda: now[0], min_ticket_age=min_ticket_age, resend_after=15.0)
+                                 clock=lambda: now[0], resend_after=15.0)
     service.sent, service.now = sent, now
     return service
 
@@ -124,36 +124,36 @@ def test_only_players_in_the_same_cell_meet(mm):
     assert mm.get_session(params["session_id"]).attrs["worldcell"] == 0
 
 
-def test_tickets_ripen_before_they_are_matched():
-    """A game drops a match proposal that arrives before it is searching: tickets are matched once they are
-    old enough (Ubisoft's server took 110 s and more)."""
-    mm = make_mm(min_ticket_age=20.0)
-    ticket(mm, A)
-    mm.now[0] += 8
-    ticket(mm, B)
-    mm.tick()
-    assert mm.sent == []                                    # A's ticket is 8 s old, B's brand new
-    mm.now[0] += 12
-    mm.tick()
-    assert mm.sent == []                                    # A: 20 s, B: 12 s
-    mm.now[0] += 8
-    mm.tick()
-    (pid, code, _), = mm.sent
-    assert (pid, code) == (A, CODE_HOST)
-
-
-def test_code_1_is_sent_again_and_then_another_player_hosts(mm):
-    ticket(mm, A), ticket(mm, B)
+def test_code_1_is_sent_again_then_the_session_is_given_up(mm):
+    """The game takes code 1 only while it is searching: ask again, then give up and put the tickets back."""
+    ta, tb = ticket(mm, A), ticket(mm, B)
     sid = mm.sent[0][2]["session_id"]
     for _ in range(2):                                      # A's game does not react: asked again
         mm.now[0] += 15
         mm.tick()
     assert [(p, c) for p, c, _ in mm.sent] == [(A, CODE_HOST)] * 3
     mm.now[0] += 15
-    mm.tick()                                               # 3 tries: B is asked instead
+    mm.tick()
+    assert mm.get_session(sid) is None and set(mm.tickets) == {ta, tb}
+    mm.update_ticket(B, tb, {})                             # the next ticket refresh matches them again
+    assert mm.sent[-1][:2] == (A, CODE_HOST) and mm.sent[-1][2]["session_id"] != sid
+
+
+def test_host_candidate_leaving_before_hosting_hands_code_1_on(mm):
+    ticket(mm, A), ticket(mm, B)
+    sid = mm.sent[0][2]["session_id"]
+    mm.leave(A, sid)                                        # A never reported as host
     assert mm.sent[-1][:2] == (B, CODE_HOST) and mm.sent[-1][2]["session_id"] == sid
-    mm.report_host_success(B, sid, urls("192.0.2.20"))
-    assert mm.sent[-1][:2] == (A, CODE_JOIN) and mm.sent[-1][2]["host_profile_id"] == B
+
+
+def test_a_new_world_ticket_leaves_the_old_world_session(mm):
+    ticket(mm, A), ticket(mm, B)
+    sid = mm.sent[0][2]["session_id"]
+    mm.report_host_success(A, sid, urls("192.0.2.10"))
+    tb2 = ticket(mm, B)                                     # B searches again without leaving first
+    s = mm.get_session(sid)
+    assert s.members[B].ticket.id == tb2 and s.members[B].state == PENDING   # left, joins again (code 2)
+    assert mm.sent[-1][:2] == (B, CODE_JOIN)
 
 
 def test_code_2_is_sent_again_until_the_joiner_reports(mm):
@@ -186,7 +186,6 @@ def test_notification_event_layout():
 # ---- over NEX: two simulated games ---------------------------------------------------------------
 @pytest.fixture
 async def two_games(services):
-    services.matchmaking.min_ticket_age = 0.0               # match right away (ripening: tested above)
     signing = ec.generate_private_key(ec.SECP256R1())
     server, transport = await nex_server.start(services, RmcDispatcher(services), signing,
                                                "127.0.0.1", "127.0.0.1", 0)

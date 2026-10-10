@@ -68,6 +68,9 @@ def check_password(password: str, stored: str) -> bool:
     return hmac.compare_digest(got.hex(), key)
 
 
+_DUMMY_HASH = hash_password(secrets.token_urlsafe(16))     # checked for unknown emails (see authenticate)
+
+
 def basic_credentials(value: str) -> tuple[str, str] | None:
     """`Basic` value -> (email, password), or None if it holds none (the game sends empty ones)."""
     try:
@@ -134,7 +137,8 @@ class AccountService:
 
     def authenticate(self, email: str, password: str) -> AccountRow:
         account = self.repos.accounts.by_email(email or "")
-        if account is None or not check_password(password or "", account.password_hash):
+        # an unknown email costs as much as a wrong password, so emails can't be probed by timing
+        if not check_password(password or "", account.password_hash if account else _DUMMY_HASH) or not account:
             raise AuthError("wrong email or password")
         return account
 
@@ -146,7 +150,8 @@ class AccountService:
         return self.repos.accounts.get(account.account_id)
 
     def change_password(self, account: AccountRow, new_password: str) -> AccountRow:
-        """Also signs Ubisoft Connect out everywhere (its remember-me tickets stop working)."""
+        """Ubisoft Connect's remember-me tickets stop working, so its next sign-in needs the new password; a
+        game that is running now stays connected."""
         self._check_password(new_password)
         self.repos.accounts.update(account.account_id, password_hash=hash_password(new_password))
         revoked = self.repos.remember_tickets.revoke_all(account.account_id)

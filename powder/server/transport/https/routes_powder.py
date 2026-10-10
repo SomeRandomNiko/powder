@@ -1,6 +1,7 @@
 """The server's own endpoints (not Ubisoft's), under /_powder/. Used by the launcher; the web admin will
-build on them. No authentication yet: they expose only player names and connection state, and the server
-is meant for a LAN/VPN of friends. Add auth before exposing a server to the internet.
+build on them. The status needs no sign-in and shows player names and the address of every connected game,
+which is fine for a server meant for a local network of friends; don't expose it to the internet. The
+account calls carry the account's email and password.
 
   GET /_powder/status   who is connected: Ubisoft Connect (demux) clients and game (NEX) sessions, and
                         the caller's address as the server sees it ("you": a launcher finds its own PC)
@@ -19,6 +20,9 @@ from ...builtin import connect_ui
 from ...services.accounts import AccountError, AuthError
 from .keys import CA_PEM, HOW, SERVICES
 from .routes_ubi import client_ip
+
+
+REGISTER_KEY = "#register"
 
 
 def _peer(nex) -> str:
@@ -62,27 +66,30 @@ async def overlay_part(request: web.Request) -> web.Response:
 # the launcher needs no session of its own. Bodies are never logged (passwords).
 async def _account_call(request: web.Request, change) -> web.Response:
     services = request.app[SERVICES]
+    limiter = services.login_failures
     ip = client_ip(request)
     request[HOW] = "powder-account"
-    if services.login_failures.blocked(ip):
-        return web.json_response({"error": "Too many failed attempts, try again in a few minutes."}, status=429)
     try:
         body = await request.json()
         if not isinstance(body, dict):
             raise ValueError
     except ValueError:
         return web.json_response({"error": "bad request"}, status=400)
+    email = str(body.get("email", ""))
+    key = REGISTER_KEY if change is None else email      # registrations count like failures (hashing is slow)
+    if limiter.blocked(ip, key):
+        return web.json_response({"error": "Too many attempts, try again in a few minutes."}, status=429)
     accounts = services.accounts
     try:
-        if change is None:                                     # register
-            account = accounts.register(str(body.get("email", "")), str(body.get("password", "")),
-                                        str(body.get("name", "")))
+        if change is None:
+            limiter.failed(ip, REGISTER_KEY)
+            account = accounts.register(email, str(body.get("password", "")), str(body.get("name", "")))
         else:
-            account = accounts.authenticate(str(body.get("email", "")), str(body.get("password", "")))
-            services.login_failures.succeeded(ip)
+            account = accounts.authenticate(email, str(body.get("password", "")))
+            limiter.succeeded(ip, email)
             account = change(accounts, account, body) or account
     except AuthError:
-        services.login_failures.failed(ip)
+        limiter.failed(ip, email)
         return web.json_response({"error": "Wrong email or password."}, status=401)
     except AccountError as e:
         return web.json_response({"error": str(e)}, status=400)

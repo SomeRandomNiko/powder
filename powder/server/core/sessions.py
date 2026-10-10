@@ -89,7 +89,7 @@ class SessionRegistry:
         return max(found, key=lambda s: s.created, default=None)
 
     def drop_player(self, profile_id: str) -> None:
-        """Forget every session of a player (password changed, account deleted)."""
+        """Forget every session of a player (account deleted or moved to another player)."""
         for t, s in list(self.by_ticket.items()):
             if s.profile_id == profile_id:
                 self.by_ticket.pop(t, None)

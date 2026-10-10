@@ -172,11 +172,17 @@ class Services:
         create_player(profile_id, config=self.config, repos=self.repos, name=name)
 
     def reset(self, profile_id: str) -> None:
-        """Wipe a player; they start again as a new player on their next login."""
+        """Wipe a player; they start again as a new player on their next login. An account that owns the
+        player keeps it (same profile id and name; deleting the row would delete the account too)."""
         with self.db.transaction():
+            account = self.repos.accounts.by_profile(profile_id)
+            player = self.repos.players.get(profile_id)
             self.repos.players.delete(profile_id)
             self.repos.entities.clear(profile_id)
             self.repos.achievements.clear(profile_id)
+            if account and player:
+                self.seed(profile_id, name=player.name)
+                self.repos.accounts.create(account.account_id, account.email, account.password_hash, profile_id)
 
     @classmethod
     def open(cls, config: Config, assets: Assets | None = None) -> "Services":

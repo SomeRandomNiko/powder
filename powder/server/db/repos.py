@@ -304,9 +304,15 @@ class RememberTicketsRepo:
     def __init__(self, db: Database):
         self.db = db
 
+    KEEP = 20                                         # per account: the newest ones (one per Connect sign-in)
+
     def add(self, ticket: str, account_id: str) -> None:
-        self.db.execute("INSERT OR REPLACE INTO remember_tickets(ticket, account_id, created_at) VALUES (?,?,?)",
-                        (ticket, account_id.lower(), utc_now()))
+        with self.db.transaction():
+            self.db.execute("INSERT OR REPLACE INTO remember_tickets(ticket, account_id, created_at) "
+                            "VALUES (?,?,?)", (ticket, account_id.lower(), utc_now()))
+            self.db.execute("DELETE FROM remember_tickets WHERE account_id = ? AND rowid NOT IN (SELECT rowid "
+                            "FROM remember_tickets WHERE account_id = ? ORDER BY rowid DESC LIMIT ?)",
+                            (account_id.lower(), account_id.lower(), self.KEEP))
 
     def account(self, ticket: str) -> str | None:
         r = self.db.execute("SELECT account_id FROM remember_tickets WHERE ticket = ?", (ticket,)).fetchone()

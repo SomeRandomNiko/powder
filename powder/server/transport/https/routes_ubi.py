@@ -12,7 +12,7 @@ from aiohttp import web
 from ...constants import APP_ID, CONNECT_SPACE_ID, SPACE_ID
 from ...core.sessions import ubi_shaped_ticket
 from ...core.identity import LoginRequest, parse_authorization
-from ...services.accounts import AuthError
+from ...services.accounts import AuthError, basic_credentials
 from ...services.economy import EconomyError
 from ...util import iso_now
 from .keys import HOW, NEX_PUBLIC_KEY, SERVICES, SESSION
@@ -54,18 +54,22 @@ async def create_session(request: web.Request) -> web.Response:
     log.info("login credentials: scheme=%s, ticket %s, app=%s", scheme or "(none)",
              f"{len(value)} chars" if value else "MISSING", request.headers.get("Ubi-AppId", "(none)"))
     ip = client_ip(request)
-    if services.login_failures.blocked(ip):
+    # only an email and password is a guess worth limiting (tickets are not guessable; the game sends
+    # `Basic` with empty credentials when Ubisoft Connect has none)
+    creds = basic_credentials(value) if scheme.lower() == "basic" else None
+    email = creds[0] if creds else ""
+    if creds and services.login_failures.blocked(ip, email):
         log.warning("login from %s refused: too many failed sign-ins, try again in a few minutes", ip)
         return auth_refused(request, "Too many failed sign-ins, try again in a few minutes")
     try:
         session = services.accounts.login(LoginRequest(ip, scheme, value, dict(request.headers)))
     except AuthError as e:
-        if scheme.lower() == "basic":            # a password guess (tickets are not guessable)
-            services.login_failures.failed(ip)
+        if creds:
+            services.login_failures.failed(ip, email)
         log.warning("login from %s refused: %s", ip, e)
         return auth_refused(request, "Invalid credentials")
-    if scheme.lower() == "basic":
-        services.login_failures.succeeded(ip)
+    if creds:
+        services.login_failures.succeeded(ip, email)
     p = session.player
     app_id = request.headers.get("Ubi-AppId", "").lower()
     connect = bool(app_id) and app_id != APP_ID

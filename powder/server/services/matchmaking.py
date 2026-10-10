@@ -1,10 +1,10 @@
 """Matchmaking (NEX MatchmakingProtocol): puts players into one session, so their games meet peer-to-peer.
 
-How Steep uses it (from recordings of Ubisoft's server):
+How Steep uses it (from recordings of Ubisoft's server, confirmed live with two PCs):
   1. Every game reserves a session id and creates its own small session (type 1, its group), with its
      station URLs (where other games reach it).
   2. It opens a match ticket (type 2 = the shared world) with search criteria (world_id, worldcell, ...)
-     and refreshes it every ~10 s (UpdateTicket).
+     and refreshes it every ~10 s (UpdateTicket); a new ticket whenever its player rides into another cell.
   3. Once two tickets match, the server makes a type-2 session and picks a host: the host gets code 1,
      asks GetSession, then reports its station URLs (ReportHostSuccess). Every other member then gets
      code 2 with the host's URLs, connects to the host and reports ReportJoinSuccess (or
@@ -16,7 +16,9 @@ A ticket is used up by a match; the game opens a new one after LeaveSession.
 
 Policy here: players meet when their tickets name the same world_id and worldcell (a game leaves a
 session of another cell right after GetSession), at most `max_size` players per session (what the
-ticket asks, 32). The game opens a new ticket whenever its player moves into another cell.
+ticket asks, 32). The game only acts on code 1 while it is searching (its SessionsFlowMachine is in
+InMatchmaking.SearchingSession), so a code 1 or 2 without an answer is sent again; after MAX_ASKS tries
+the session is given up and its members' tickets go back into the pool.
 
 The service is synchronous and transport-free: notifications go through `notify(profile_id, code,
 params)`, which the server wires to NEX pushes (services/__init__.py).
@@ -37,10 +39,26 @@ log = logging.getLogger("powder.matchmaking")
 SESSION_GROUP, SESSION_WORLD = 1, 2                  # session types: the player's own group, the shared world
 PENDING, JOINED = 1, 2                               # member states (GetSession)
 CODE_HOST, CODE_JOIN, CODE_MIGRATE_DONE, CODE_BECOME_HOST = 1, 2, 10, 12
-MIN_TICKET_AGE_S = 20.0           # a ticket is matched once it is this old (see _ripe)
 RESEND_AFTER_S = 15.0             # code 1 / 2 again when the game did not react within this time
-MAX_ASKS = 3                      # then another member is asked to host (code 1) / no more tries (code 2)
+MAX_ASKS = 3                      # tries per code 1 / 2; then the session is given up / the member left alone
 ATTR_ORDER = ("worldcell", "language", "country", "connectivity_nat", "version", "world_id")
+
+
+@dataclass
+class Ticket:
+    id: int                                          # increasing: a lower id is an older ticket
+    profile_id: str
+    own_session: int
+    session_type: int
+    criteria: dict[str, int]
+    excluded: set[int]
+    max_size: int
+    created: datetime.datetime = field(default_factory=lambda: datetime.datetime.now(datetime.UTC))
+
+    @property
+    def place(self) -> tuple:
+        """Where the player is: world and world cell. Only tickets of one place are matched."""
+        return self.criteria.get("world_id"), self.criteria.get("worldcell")
 
 
 @dataclass
@@ -48,9 +66,8 @@ class Member:
     profile_id: str
     state: int = PENDING
     urls: list[str] = field(default_factory=list)
-    ticket_id: int | None = None
-    ticket_created: datetime.datetime | None = None
-    asked_at: float | None = None                    # code 1/2 last sent to this member (clock)
+    ticket: Ticket | None = None                     # the ticket that brought the member in (world sessions)
+    asked_at: float | None = None                    # code 1 / 2 last sent, while no answer came (clock)
     asked: int = 0                                   # how often
 
 
@@ -70,28 +87,9 @@ class Session:
     def free(self) -> int:
         return max(0, self.max_size - len(self.members))
 
-
-@dataclass
-class Ticket:
-    id: int
-    profile_id: str
-    own_session: int
-    session_type: int
-    criteria: dict[str, int]
-    excluded: set[int]
-    max_size: int
-    created: datetime.datetime = field(default_factory=lambda: datetime.datetime.now(datetime.UTC))
-    monotonic: float = 0.0                          # when it was opened (service clock)
-
-    @property
-    def world(self):
-        return self.criteria.get("world_id")
-
     @property
     def place(self) -> tuple:
-        """Where the player is: world and world cell. Only tickets of one place are matched; a game leaves a
-        session of another cell right after GetSession and opens a new ticket (seen live)."""
-        return self.criteria.get("world_id"), self.criteria.get("worldcell")
+        return self.attrs.get("world_id"), self.attrs.get("worldcell")
 
 
 def reachable_urls(urls: list[str]) -> list[str]:
@@ -115,8 +113,8 @@ def iso(t: datetime.datetime) -> str:
 
 class MatchmakingService:
     def __init__(self, notify: Callable[[str, int, dict], None] | None = None, clock=time.monotonic,
-                 min_ticket_age: float = MIN_TICKET_AGE_S, resend_after: float = RESEND_AFTER_S):
-        self.clock, self.min_ticket_age, self.resend_after = clock, min_ticket_age, resend_after
+                 resend_after: float = RESEND_AFTER_S):
+        self.clock, self.resend_after = clock, resend_after
         self._session_ids = itertools.count(0x196001)
         self._ticket_ids = itertools.count(0x7D0000, 0x1234)
         self.notify = notify or (lambda pid, code, params: None)
@@ -144,9 +142,13 @@ class MatchmakingService:
     def create_match_ticket(self, profile_id: str, own_session: int = 0, session_type: int = SESSION_WORLD,
                             criteria: dict | None = None, excluded=(), max_size: int = 32) -> int:
         t = Ticket(next(self._ticket_ids), profile_id, own_session, session_type, dict(criteria or {}),
-                   set(excluded), max_size, monotonic=self.clock())
+                   set(excluded), max_size)
+        if session_type == SESSION_WORLD:            # one world session per player: a new search ends the old
+            for sid in [sid for sid, s in self.sessions.items()
+                        if s.type == SESSION_WORLD and profile_id in s.members]:
+                self.leave(profile_id, sid)
         self.tickets[t.id] = t
-        log.info("ticket %d from %s: world %s, cell %s%s", t.id, profile_id, t.world, t.criteria.get("worldcell"),
+        log.info("ticket %d from %s: world %s, cell %s%s", t.id, profile_id, *t.place,
                  f", excluding sessions {sorted(t.excluded)}" if t.excluded else "")
         self._match(t)
         return t.id
@@ -166,50 +168,37 @@ class MatchmakingService:
             del self.tickets[tid]
 
     # ---- matching -------------------------------------------------------------------------------
-    def _ripe(self, t: Ticket) -> bool:
-        """Old enough to be matched: a game opens its ticket while it is still setting up its own group
-        session and drops a match proposal that arrives before it is searching (Ubisoft's server matched
-        after 110 s and more)."""
-        return self.clock() - t.monotonic >= self.min_ticket_age
-
     def _match(self, t: Ticket) -> None:
-        if t.session_type != SESSION_WORLD or t.id not in self.tickets or not self._ripe(t):
+        if t.session_type != SESSION_WORLD or t.id not in self.tickets:
             return
         # an existing session with a known host
-        for s in sorted(self.sessions.values(), key=lambda s: s.created):
+        for s in sorted(self.sessions.values(), key=lambda s: s.id):
             if (s.type == SESSION_WORLD and s.host and s.host_urls and s.free and s.id not in t.excluded
-                    and t.profile_id not in s.members
-                    and (s.attrs.get("world_id"), s.attrs.get("worldcell")) == t.place):
+                    and t.profile_id not in s.members and s.place == t.place):
                 self._add(s, t)
                 self._send_join(s, s.members[t.profile_id])
                 return
         # another waiting ticket: a new session, the older ticket's player hosts
-        for other in sorted(self.tickets.values(), key=lambda o: o.monotonic):
+        for other in sorted(self.tickets.values(), key=lambda o: o.id):
             if (other is not t and other.profile_id != t.profile_id and other.session_type == SESSION_WORLD
-                    and other.place == t.place and self._ripe(other)
-                    and not self._in_world_session(other.profile_id)):
-                older, newer = (other, t) if other.monotonic <= t.monotonic else (t, other)
-                self._new_session(older, newer)
+                    and other.place == t.place):
+                self._new_session(*sorted((other, t), key=lambda x: x.id))
                 return
 
-    def _in_world_session(self, profile_id: str) -> bool:
-        return any(s.type == SESSION_WORLD and profile_id in s.members for s in self.sessions.values())
-
     def _add(self, s: Session, t: Ticket) -> None:
-        s.members[t.profile_id] = Member(t.profile_id, PENDING, ticket_id=t.id, ticket_created=t.created)
+        s.members[t.profile_id] = Member(t.profile_id, PENDING, ticket=t)
         self.tickets.pop(t.id, None)
 
     def _new_session(self, host_ticket: Ticket, joiner: Ticket) -> None:
         crit = host_ticket.criteria
         attrs = {k: int(crit[k]) for k in ATTR_ORDER if k in crit}
         attrs["reputation"] = 1
-        s = Session(next(self._session_ids), SESSION_WORLD, None, attrs, max_size=host_ticket.max_size,
-                    host_candidate=host_ticket.profile_id)
+        s = Session(next(self._session_ids), SESSION_WORLD, None, attrs, max_size=host_ticket.max_size)
         self.sessions[s.id] = s
         self._add(s, host_ticket)
         self._add(s, joiner)
-        log.info("session %d: %s hosts, %s joins (world %s)", s.id, host_ticket.profile_id, joiner.profile_id,
-                 host_ticket.world)
+        log.info("session %d: %s hosts, %s joins (world %s, cell %s)", s.id, host_ticket.profile_id,
+                 joiner.profile_id, *s.place)
         self._ask_host(s, s.members[host_ticket.profile_id])
 
     def _ask_host(self, s: Session, m: Member) -> None:
@@ -218,20 +207,29 @@ class MatchmakingService:
         m.asked_at, m.asked = self.clock(), m.asked + 1
         if m.asked > 1:
             log.info("session %d: asking %s to host again (try %d)", s.id, m.profile_id, m.asked)
+        created = m.ticket.created if m.ticket else s.created
         self.notify(m.profile_id, CODE_HOST, {
-            "session_type": s.type, "ticket_id": m.ticket_id, "session_id": s.id,
-            "ticket_creation_dates": json.dumps([iso(m.ticket_created or s.created)])})
+            "session_type": s.type, "ticket_id": m.ticket.id if m.ticket else None, "session_id": s.id,
+            "ticket_creation_dates": json.dumps([iso(created)])})
 
     def _send_join(self, s: Session, m: Member) -> None:
         m.asked_at, m.asked = self.clock(), m.asked + 1
         log.info("session %d: %s joins host %s%s", s.id, m.profile_id, s.host,
                  f" (try {m.asked})" if m.asked > 1 else "")
-        tickets = {pid: x.ticket_id for pid, x in s.members.items() if x.ticket_id is not None}
+        tickets = {pid: x.ticket.id for pid, x in s.members.items() if x.ticket}
         self.notify(m.profile_id, CODE_JOIN, {
             "session_type": s.type,
-            "ticket_creation_dates": json.dumps([iso(m.ticket_created or s.created)]),
+            "ticket_creation_dates": json.dumps([iso(m.ticket.created if m.ticket else s.created)]),
             "ticket_ids": json.dumps(tickets), "session_id": s.id, "host_profile_id": s.host,
             "host_station_urls": json.dumps(reachable_urls(s.host_urls))})
+
+    def _give_up(self, s: Session) -> None:
+        """Nobody took the session: dissolve it and put its members' tickets back, so they are matched anew."""
+        log.warning("session %d: no member reported as host, giving it up", s.id)
+        del self.sessions[s.id]
+        for m in s.members.values():
+            if m.ticket:
+                self.tickets[m.ticket.id] = m.ticket
 
     # ---- reports from the games -----------------------------------------------------------------
     def report_host_success(self, profile_id: str, sid: int, urls: list[str]) -> None:
@@ -240,19 +238,21 @@ class MatchmakingService:
             log.warning("ReportHostSuccess from %s for unknown session %d", profile_id, sid)
             return
         s.host, s.host_urls, s.host_candidate = profile_id, list(urls), None
-        s.members[profile_id].state = JOINED
-        s.members[profile_id].urls = list(urls)
+        host = s.members[profile_id]
+        host.state, host.urls, host.asked_at = JOINED, list(urls), None
         log.info("session %d: %s hosts (%d station URLs)", sid, profile_id, len(urls))
         for m in list(s.members.values()):
             if m.profile_id != profile_id and m.state == PENDING:
+                m.asked = 0
                 self._send_join(s, m)
-        for t in sorted(self.tickets.values(), key=lambda t: t.monotonic):
+        for t in sorted(self.tickets.values(), key=lambda t: t.id):
             self._match(t)
 
     def report_join_success(self, profile_id: str, sid: int) -> None:
         s = self.sessions.get(sid)
         if s and profile_id in s.members:
-            s.members[profile_id].state = JOINED
+            m = s.members[profile_id]
+            m.state, m.asked_at = JOINED, None
             log.info("session %d: %s connected to host %s", sid, profile_id, s.host)
 
     def report_connection_failure(self, profile_id: str, sid: int, reason: int | None = None) -> None:
@@ -289,14 +289,19 @@ class MatchmakingService:
         if not s.members or (s.type != SESSION_WORLD and s.host == profile_id):
             del self.sessions[sid]
             return
-        if profile_id in (s.host, s.host_candidate):
-            s.host, s.host_urls, s.host_candidate = None, [], None
-            joined = [m for m in s.members.values() if m.state == JOINED] or list(s.members.values())
-            new = joined[0].profile_id
-            s.host_candidate = new
-            log.info("session %d: host left, asking %s to host", sid, new)
-            self.notify(new, CODE_BECOME_HOST, {"host_profile_id": new, "session_id": sid,
-                                                "session_type": s.type})
+        if s.type != SESSION_WORLD:
+            return
+        if profile_id == s.host:                     # a running session: another member takes over
+            s.host, s.host_urls = None, []
+            new = next((m for m in s.members.values() if m.state == JOINED), next(iter(s.members.values())))
+            s.host_candidate, new.asked_at = new.profile_id, None
+            log.info("session %d: host left, asking %s to host", sid, new.profile_id)
+            self.notify(new.profile_id, CODE_BECOME_HOST, {"host_profile_id": new.profile_id, "session_id": sid,
+                                                           "session_type": s.type})
+        elif profile_id == s.host_candidate and s.host is None:    # it never hosted: ask the next one
+            new = next(iter(s.members.values()))
+            new.asked = 0
+            self._ask_host(s, new)
 
     def on_disconnect(self, profile_id: str) -> None:
         """The player's game is gone (NEX connection closed): out of every session, tickets cancelled."""
@@ -307,35 +312,26 @@ class MatchmakingService:
 
     # ---- timer ----------------------------------------------------------------------------------
     def tick(self) -> None:
-        """Every second (NEX server timers): match tickets that became old enough, and ask again where a
-        game did not react. A host that never reports back hands over to another member."""
+        """Every second (NEX server timers): ask again where a game did not react to code 1 or 2."""
         now = self.clock()
-        for t in sorted(self.tickets.values(), key=lambda t: t.monotonic):
-            self._match(t)
         for s in list(self.sessions.values()):
             if s.type != SESSION_WORLD:
                 continue
-            if s.host is None and s.host_candidate in s.members:
-                m = s.members[s.host_candidate]
-                if m.asked_at is not None and now - m.asked_at >= self.resend_after:
+            for m in list(s.members.values()):
+                if m.asked_at is None or now - m.asked_at < self.resend_after:
+                    continue
+                if m.profile_id == s.host_candidate and s.host is None:
                     if m.asked < MAX_ASKS:
                         self._ask_host(s, m)
                     else:
-                        others = sorted((x for x in s.members.values() if x.profile_id != m.profile_id),
-                                        key=lambda x: x.asked)
-                        if others:
-                            log.warning("session %d: %s never reported as host; asking %s instead", s.id,
-                                        m.profile_id, others[0].profile_id)
-                            m.asked = 0
-                            self._ask_host(s, others[0])
-                        else:
-                            m.asked = 0
-                            self._ask_host(s, m)
-            elif s.host:
-                for m in s.members.values():
-                    if (m.profile_id != s.host and m.state == PENDING and m.asked_at is not None
-                            and now - m.asked_at >= self.resend_after and m.asked < MAX_ASKS):
+                        self._give_up(s)
+                        break
+                elif s.host and m.state == PENDING:
+                    if m.asked < MAX_ASKS:
                         self._send_join(s, m)
+                    else:
+                        log.warning("session %d: %s never reported joining", s.id, m.profile_id)
+                        m.asked_at = None
 
     # ---- GetSession ----------------------------------------------------------------------------
     def get_session(self, sid: int) -> Session | None:
