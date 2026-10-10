@@ -24,6 +24,19 @@ class ConsoleSession(Session):
             if pick.isdigit() and 1 <= int(pick) <= len(actions):
                 return actions[int(pick) - 1]
 
+    def request(self, kind, info=None):
+        import getpass
+        if kind not in ("register", "sign_in"):
+            return None
+        answers = {"email": input("email: ").strip(), "password": getpass.getpass("password: ")}
+        if kind == "register":
+            if getpass.getpass("password again: ") != answers["password"]:
+                print("the passwords differ")
+                return None
+            answers["name"] = input("player name" + (f" (empty: keep {info['takes_over']})" if (info or {}).get(
+                "takes_over") else "") + ": ").strip()
+        return answers
+
 
 def main(argv: list[str] | None = None) -> int:
     p = argparse.ArgumentParser(prog="powder")

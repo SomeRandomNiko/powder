@@ -244,14 +244,38 @@ def test_certutil_store_parsing(monkeypatch):
 class FakePC:
     """Everything the restore flow touches, in memory."""
 
-    def __init__(self, hosts=True, cas=2, connect=True, game=False):
+    def __init__(self, hosts=True, cas=2, connect=True, game=False, rules=()):
         self.hosts = ["# marker", "127.0.0.1 public-ubiservices.ubi.com"] if hosts else []
         self.cas = [(f"T{i}", "CN=Powder (Steep) local CA") for i in range(cas)]
         self.connect, self.game, self.calls = connect, game, []
+        self.rules = list(rules)                         # our firewall rules (names)
+        self.game_rules: list = []                       # anyone's rules for Steep.exe
 
     def install(self, monkeypatch, uac_ok=True):
         from powder.server import trust
-        from powder.launcher import attach, connect, elevate, footprint, server
+        from powder.launcher import attach, connect, elevate, firewall, footprint, server
+
+        def add_rules(needed, what):
+            self.calls.append(("firewall add", tuple(what)))
+            if uac_ok:
+                for name in what:
+                    if name == firewall.SERVER_RULE:
+                        self.rules += [f"{name} (TCP)", f"{name} (UDP)"]
+                    else:
+                        self.game_rules.append(firewall.Rule(name, "Allow", True, str(needed.game_exe), "Powder"))
+                        self.rules.append(name)
+            return 0 if uac_ok else -1
+
+        def remove_rules():
+            self.calls.append(("firewall remove",))
+            if uac_ok:
+                self.rules = []
+            return 0 if uac_ok else -1
+
+        monkeypatch.setattr(firewall, "ours", lambda: [firewall.Rule(n, "Allow", True, "", "Powder") for n in self.rules])
+        monkeypatch.setattr(firewall, "for_program", lambda exe: list(self.game_rules))
+        monkeypatch.setattr(firewall, "add", add_rules)
+        monkeypatch.setattr(firewall, "remove_ours", remove_rules)
 
         def hosts(action, address, backup_dir):
             self.calls.append(("hosts", action))

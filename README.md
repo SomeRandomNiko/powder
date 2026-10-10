@@ -31,11 +31,11 @@ What Steep needs a server for, and how far Powder covers it.
 
 | Feature                                         | Status | Notes                                                                                       |
 | ----------------------------------------------- | ------ | ------------------------------------------------------------------------------------------- |
-| Ubisoft Connect sign-in                         | ✅     | Any email/password; Connect stays signed in to the server                                   |
+| Ubisoft Connect sign-in                         | ✅     | With your Powder account (registered in the launcher); Connect stays signed in              |
 | Game login (Steam and Ubisoft Connect versions) | ✅     | Both versions of the final update (TU7)                                                     |
 | Owned games / DLC ownership                     | ✅     | Steep and its add-ons, built in                                                             |
 | Game configuration, season info                 | ✅     | Built in (the game-data pack's copy is used when installed)                                 |
-| Several players on one server                   | 🟡     | Possible by mapping IP addresses to players (`[players.bind]`); no real player accounts yet |
+| Several players on one server                   | ✅     | An account per player (email and password), each with their own progress                    |
 
 ### Progression and economy
 
@@ -63,8 +63,8 @@ What Steep needs a server for, and how far Powder covers it.
 
 | Feature                                                  | Status | Notes                                                                     |
 | -------------------------------------------------------- | ------ | ------------------------------------------------------------------------- |
-| Multiplayer sessions (other riders in the world, groups) | ❌     | The game opens its own session; players are never matched with each other |
-| Matchmaking                                              | 🟡     | Answered, so the game does not stall; it never finds a match              |
+| Multiplayer sessions (other riders in the world, groups) | 🟡     | Players in one world are put into one session (local network); no groups yet; not yet tested with two PCs |
+| Matchmaking                                              | 🟡     | Everyone in the same world meets (the area is not considered yet)                                         |
 | Friends list, invites, blocks                            | ❌     | Always empty                                                              |
 | Other players' profiles (rider card, level)              | ❌     | Only your own                                                             |
 
@@ -155,8 +155,23 @@ uv run powder-server gamedata install steep-gamedata.zip        # .zip or folder
 
 ## Players
 
-A player who logs in for the first time starts like a new Ubisoft account: level 1, empty inventory,
-`starting_credits`. To continue with your own progress, import it once from your recordings:
+Every player has an account on the server: an email and a password, registered in the launcher (the
+**Account** row or the Account step of Play) and used to sign in to Ubisoft Connect. The email can be
+changed later; the password is stored only as a scrypt hash, never logged. Wrong passwords are
+rate-limited per address. The first account on a server takes over the player already there (e.g. your
+imported progress); every further account starts like a new Ubisoft account: level 1, empty inventory,
+`starting_credits`. A server without any account accepts every sign-in, as before accounts existed, until
+the first player registers. If someone forgets their password, the host sets a new one:
+
+```
+uv run powder-server admin accounts                    # email -> player
+uv run powder-server admin account-password <email>    # asks for the new password
+uv run powder-server admin account-email <email> <new email>
+uv run powder-server admin account-link <email> <player id>   # the account owns that player instead
+```
+
+To continue with your own progress, import it once from your recordings (then register: the first account
+takes it over):
 
 ```
 uv run powder-server admin import <recordings>      # level, credits, items, stats, rider card, achievements
@@ -173,22 +188,37 @@ repository depends on it.
 versions of Steep. It finds them wherever they are installed, from what Steam (its libraries and app
 manifests) and Ubisoft Connect (its install records) note about them. With both installed it shows
 **Play (Steam)** and **Play (Ubisoft Connect)**, otherwise a single **Play**. Pressing Play walks through
-these steps; each step only checks unless something is missing:
+these steps; each step only checks unless something is missing.
+
+Where the server is, is chosen in the **Server** row (remembered, applied at the next Play):
+
+- **Just this PC**: the launcher runs a server that only this PC can use.
+- **Host for others**: the launcher runs the server for the whole local network and shows this PC's
+  address (choose one if the PC has several). The other players enter it under Join.
+- **Join**: the address of a PC that hosts. Nothing runs here but the game.
+
+Without a choice, `server_mode` and `server_address` in `launcher.toml` decide. The steps:
 
 1. **Game files**: finds the chosen Steep, Ubisoft Connect (and Steam for the Steam version), and checks
    that `Steep.exe` is a build the TLS helper supports.
-2. **Server**: reaches it, or starts it locally (`server_mode = "local"`, the default) after checking that
-   its ports are free (if not, it names the program using them), with or without the game-data pack as
-   the checkbox says (a server it started with the other setting is restarted). With
-   `server_mode = "remote"` and `server_address` it uses a server on another PC instead (its pack is that
-   server's business), and warns if that server's major version differs.
-3. **DNS**: every Ubisoft hostname (`powder/server/hostnames.py`) must resolve to the server address. If not,
+2. **Server**: reaches it, or starts it locally (Just this PC / Host) after checking that its ports are
+   free (if not, it names the program using them), with or without the game-data pack as the checkbox says
+   (a server it started with another setting is restarted). Joining, it uses the server on the other PC
+   (its pack is that server's business), and warns if that server's major version differs.
+3. **Firewall** (hosting or joining): Windows Firewall must let the other PCs in. The host needs a rule
+   for the server's ports, every player one for Steep itself (the games connect to each other directly).
+   Both allow only the local network. If one is missing, the launcher explains it and adds it after you
+   press the button (Windows asks for admin rights). It also warns if a rule from an earlier Windows prompt
+   blocks Steep.
+4. **DNS**: every Ubisoft hostname (`powder/server/hostnames.py`) must resolve to the server address. If not,
    it shows the lines to add to your own DNS server, or adds them to the hosts file for you (the previous
    hosts file is backed up to `data/launcher/hosts-backups/`).
-4. **Certificate**: gets the server's CA and, if Windows doesn't trust it yet, installs it for your user.
-5. **Ubisoft Connect**: restarts it if it is not signed in to the server, then waits for its login (any
-   email and password work).
-6. **Steep**: starts it through Steam or Ubisoft Connect, attaches the TLS helper to the game and waits
+5. **Certificate**: gets the server's CA and, if Windows doesn't trust it yet, installs it for your user.
+6. **Account**: registers your account on the server, or signs in to one you already have there (the
+   launcher remembers the email, never the password).
+7. **Ubisoft Connect**: restarts it if it is not signed in to the server as this PC's player, then waits
+   for its login: sign in with the account's email and password.
+8. **Steep**: starts it through Steam or Ubisoft Connect, attaches the TLS helper to the game and waits
    until it is online. Both versions start a short-lived starter process first; the helper attaches only
    to the real game from the chosen install. While the launcher stays open, the server keeps running, so
    Ubisoft Connect stays signed in and the next Play goes straight to the game.
@@ -199,8 +229,8 @@ pack…** installs a `.zip` into the local server's `gamedata/`. Then a checkbox
 it; changes apply at the next Play.
 
 Every Windows prompt is announced first: the launcher says why it is needed (the hosts file is a protected
-system file, so it needs admin rights; Windows asks to confirm a new certificate) and only continues when
-you press the button for it.
+system file and firewall rules are system settings, so both need admin rights; Windows asks to confirm a
+new certificate) and only continues when you press the button for it.
 
 The TLS helper (`native/`) makes the game accept the server's certificate: `hook_guard.dll` traps the
 game's certificate check without changing code bytes at first, `armer.exe` keeps that trap armed and then
@@ -212,7 +242,7 @@ compiled game, packaged differently). Game files are never modified on disk.
 
 **Restore system…** undoes everything the launcher set up: it stops the server it started, quits
 Ubisoft Connect (which otherwise stays connected to the server), removes the hosts-file entries (backup
-kept) and removes the server's certificate. Each step asks before a Windows prompt, offers to skip, and
+kept), the server's certificate and the launcher's firewall rules (group "Powder"). Each step asks before a Windows prompt, offers to skip, and
 only acts if something is there, so it is safe to run any time. **Play** sets everything up again.
 `powder --status` and `powder --restore` do the same from a console.
 
@@ -235,10 +265,16 @@ Installed, Powder's folder is `%LOCALAPPDATA%\Powder`; from source, the current 
 | 6005 | UDP      | Quazal NEX (the game's online session)                                                         |
 | 80   | TCP      | the local CA's revocation list (`http://public-ubiservices.ubi.com/powder-ca.crl`)             |
 
-All three are set in `config.toml`. By default the server only listens on this PC (`bind = "127.0.0.1"`),
-so Windows never asks about the firewall. For friends on a LAN/VPN, set `bind = "0.0.0.0"` and
-`public_host` to the server's address there (Windows then asks once whether to allow Powder through the
-firewall), and use `server_mode = "remote"` in their launchers.
+All three are set in `config.toml`. By default the server only listens on this PC (`bind = "127.0.0.1"`).
+To host for the local network, choose **Host for others** in the launcher: it starts the server with
+`--bind 0.0.0.0 --public-host <this PC's address>` and adds the firewall rule. Without the launcher, set
+`bind = "0.0.0.0"` and `public_host` in `config.toml` and allow the ports in Windows Firewall yourself.
+
+The players' games also talk to each other directly (UDP, peer-to-peer, ports the game picks). On a
+local network that needs nothing but the firewall rule for Steep. `[multiplayer] storm = "off"` (the
+default) keeps the game away from Ubisoft's peer-to-peer helper servers (NAT detection and traversal)
+that a game-data pack's configuration names; playing over the internet would need those, which Powder
+does not provide yet.
 
 ## Progression
 
@@ -253,8 +289,9 @@ present, `tests/test_recordings.py` replays them to check the rules reproduce ev
 Steep only goes online when Ubisoft Connect is online, and without Ubisoft's servers Connect starts in
 offline mode. So the server also stands in for what Connect needs:
 
-- **Login**: Connect's `POST /v3/profiles/sessions` (remember-me, refresh or email:password; every
-  credential is accepted, passwords are never logged or stored) and its other UbiServices calls.
+- **Login**: Connect's `POST /v3/profiles/sessions` (email and password of a Powder account, then the
+  remember-me ticket it got; passwords are never logged) and its other UbiServices calls. The game's own
+  login follows the player Connect signed in as on the same PC.
 - **Demux** (`dmx.upc.ubisoft.com`): Connect's own protocol for login, owned games, friends, play
   sessions, achievements and ownership tokens (`transport/demux/`). It shares port 443 with HTTPS: the
   listener routes by the requested hostname (`transport/tls_router.py`).
@@ -274,8 +311,10 @@ uv run powder-server admin trust remove
 
 What is not emulated (cloud saves, friends, Connect's news and store pages): see [Game features](#game-features).
 
-The server's own endpoints: `GET /_powder/status` (connected Connect clients and game sessions) and
-`GET /_powder/ca.pem` (the CA certificate). No authentication yet: meant for a LAN/VPN of friends.
+The server's own endpoints: `GET /_powder/status` (connected Connect clients and game sessions, and the
+caller's address), `GET /_powder/ca.pem` (the CA certificate) and `/_powder/account/*` (the launcher
+registers and changes accounts there; every call carries the account's password). Meant for a local
+network of friends: don't expose the server to the internet.
 
 ## Admin
 
@@ -314,8 +353,8 @@ uv run powder-server admin trust status           # the local CA in Windows (als
 - **New HTTPS endpoint**: add a route in `transport/https/routes_*.py`; keep logic in `services/`.
 - **Schema change**: add `db/migrations/000N_name.sql`; it is applied on the next start.
 - **Plugin**: drop `plugins/name.py` with `setup(api)`; see `powder/server/plugins/api.py`.
-- **Several players**: map machines to profiles in `[players.bind]` (client IP -> profile id) and set
-  `public_host` to the host's LAN/VPN address. Each player gets their own inventory and stats.
+- **Matchmaking** policy (who meets whom) is in `services/matchmaking.py`; the game's calls and the
+  notifications it expects are described there.
 
 ## Licence
 

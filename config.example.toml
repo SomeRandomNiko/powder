@@ -1,9 +1,9 @@
 # Copy to config.toml and adjust. Every setting is optional (these are the defaults).
 
 [server]
-bind = "127.0.0.1"          # this PC only. For friends on a LAN/VPN: "0.0.0.0" and public_host below
-                            # (Windows then asks once whether to allow Powder through the firewall)
-public_host = "127.0.0.1"   # address the game uses to reach this server (LAN/VPN IP for friends)
+bind = "127.0.0.1"          # this PC only. For friends on the local network: "0.0.0.0" and public_host
+                            # below (the launcher's "Host for others" does this, plus the firewall rule)
+public_host = "127.0.0.1"   # address the games use to reach this server (this PC's LAN address for friends)
 https_port = 443           # HTTPS for the game and Ubisoft Connect, incl. Connect's demux (routed by hostname)
 nex_port = 6005
 crl_port = 80               # revocation list for the local CA (http://public-ubiservices.ubi.com/powder-ca.crl)
@@ -18,11 +18,16 @@ log_level = "INFO"
 strict_tickets = false      # true: refuse requests with tickets the server did not issue
 
 [players]
-# default = "<profile id>"  # player used when a login cannot be told apart. Unset: the imported player,
-#                           # or else the first player, created as a new account on the first login.
-# Map friends' machines to their own player (profile id), by the IP the server sees:
-# [players.bind]
+# Players sign in with accounts (registered in the launcher). Only while a server has no account yet:
+# default = "<profile id>"  # the player every login becomes. Unset: the imported player, or else the
+#                           # first player, created on the first login. The first account takes it over.
+# [players.bind]            # (legacy, before accounts) a client IP -> its own player
 # "192.168.1.20" = "<profile id>"
+
+[multiplayer]
+storm = "off"               # "off": the game gets no peer-to-peer helper servers (players on one local
+                            # network reach each other directly); "pack": a game-data pack's settings as
+                            # recorded (Ubisoft's NAT detection/traversal hosts)
 
 [gameplay]
 unlimited_heli_tickets = false   # (planned)

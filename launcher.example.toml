@@ -1,5 +1,6 @@
 # Copy to launcher.toml (next to config.toml) and adjust. Every setting is optional.
 
+# The launcher's Server row (Just this PC / Host for others / Join) overrides these two once used.
 server_mode = "local"            # "local": the launcher starts the Powder server here; "remote": only connect to it
 server_address = "127.0.0.1"     # the address every Ubisoft hostname must resolve to (this PC, or a LAN/VPN IP)
 server_https_port = 443

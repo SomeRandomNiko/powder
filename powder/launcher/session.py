@@ -2,8 +2,13 @@
 something when needed; when it needs the user (hosts entries, certificate, restarting Connect) it shows
 the choices and waits for one. The UI only renders steps and forwards button clicks.
 
-Play:            game files -> server -> DNS -> certificate -> Ubisoft Connect -> game -> (cleanup on exit)
-Restore system:  Steep closed -> server stopped -> Connect quit -> hosts entries removed -> CA removed -> check
+Play:            game files -> server -> firewall -> DNS -> certificate -> account -> Ubisoft Connect -> game
+Restore system:  Steep closed -> server stopped -> Connect quit -> hosts entries removed -> CA removed ->
+                 firewall rules removed -> check
+
+The server row of the window picks where the server is (remembered in settings.json, applied at the next
+Play): "Just this PC" (a local server for this PC only), "Host" (a local server other PCs on the network
+can join) or "Join" (a server on another PC).
 """
 from __future__ import annotations
 
@@ -14,7 +19,7 @@ import queue
 import threading
 import time
 import webbrowser
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from pathlib import Path
 from typing import Callable
 
@@ -23,7 +28,7 @@ from powder.server.config import Config as ServerSettings
 from powder.server.gamedata import pack
 
 from ..version import __version__, compatible
-from . import attach, certs, connect, dns, elevate, footprint, game, locate, ports, server
+from . import account, attach, certs, connect, dns, elevate, firewall, footprint, game, locate, network, ports, server
 from .config import LauncherConfig
 
 log = logging.getLogger("powder.launcher")
@@ -37,6 +42,10 @@ ONLINE, OFFLINE, STARTER, CRASHED, CLOSED_EARLY = "online", "offline", "starter"
 HOSTS_ADMIN_WHY = ("Changing the hosts file needs admin rights because it is a protected Windows system file: "
                    "when you click \"{button}\", Windows asks for permission (UAC). Only these lines are {verb}, "
                    "and the current file is backed up first.")
+FIREWALL_WHY = ("Windows Firewall lets other PCs reach this one only for programs and ports it was told about. "
+                "{what} Both rules allow only PCs in your local network. Adding them needs admin rights: when you "
+                "click \"Add firewall rules\", Windows asks for permission (UAC). Restore system removes them again.")
+LOCAL, HOST, JOIN = "local", "host", "join"      # where the server is (the server row)
 
 
 @dataclass
@@ -54,8 +63,9 @@ class Cancelled(Exception):
 
 
 def play_steps() -> list[Step]:
-    return [Step("files", "Game files"), Step("server", "Server"), Step("dns", "DNS / hosts"),
-            Step("cert", "Certificate"), Step("connect", "Ubisoft Connect"), Step("game", "Steep")]
+    return [Step("files", "Game files"), Step("server", "Server"), Step("firewall", "Firewall"),
+            Step("dns", "DNS / hosts"), Step("cert", "Certificate"), Step("account", "Account"),
+            Step("connect", "Ubisoft Connect"), Step("game", "Steep")]
 
 
 @dataclass
@@ -83,12 +93,16 @@ def launch_url(install: locate.Install, steam_app_id: int) -> str:
 
 def restore_steps() -> list[Step]:
     return [Step("game", "Steep"), Step("server", "Server"), Step("connect", "Ubisoft Connect"),
-            Step("hosts", "Hosts file"), Step("cert", "Certificate"), Step("check", "Result")]
+            Step("hosts", "Hosts file"), Step("cert", "Certificate"), Step("firewall", "Firewall"),
+            Step("check", "Result")]
 
 
 class Session:
     def __init__(self, cfg: LauncherConfig, data_dir: Path, on_update: Callable[[], None] = lambda: None):
-        self.cfg, self.data_dir, self.on_update = cfg, data_dir, on_update
+        self.base_cfg, self.data_dir, self.on_update = cfg, data_dir, on_update
+        self.cfg = self.effective_cfg()                 # launcher.toml + the server row's choice
+        # the UI's way to ask for input (account dialogs): (kind, info) -> answers or None if cancelled
+        self.dialog: Callable[[str, dict], dict | None] | None = None
         self.steps = play_steps()
         self.choices: queue.Queue[str] = queue.Queue()
         self.cancel = threading.Event()
@@ -147,8 +161,9 @@ class Session:
         if self.thread and self.thread.is_alive():
             return
         self.chosen = install
-        self._launch(play_steps(), (self.check_files, self.check_server, self.check_dns,
-                                    self.check_cert, self.check_connect, self.run_game))
+        self.cfg = self.effective_cfg()
+        self._launch(play_steps(), (self.check_files, self.check_server, self.check_firewall, self.check_dns,
+                                    self.check_cert, self.check_account, self.check_connect, self.run_game))
 
     def restore(self) -> None:
         """Restore system: undo what the launcher set up (see footprint.py)."""
@@ -156,7 +171,7 @@ class Session:
 
     def restore_flow(self) -> tuple:
         return (self.restore_game, self.restore_server, self.restore_connect, self.restore_hosts,
-                self.restore_cert, self.restore_check)
+                self.restore_cert, self.restore_firewall, self.restore_check)
 
     def _launch(self, steps: list[Step], flow) -> None:
         if self.thread and self.thread.is_alive():
@@ -265,43 +280,142 @@ class Session:
         log.info("game-data pack removed")
         return None
 
+    def _save_prefs(self, **changes) -> None:
+        prefs = self._prefs()
+        prefs.update(changes)
+        self.data_dir.mkdir(parents=True, exist_ok=True)
+        self._prefs_path().write_text(json.dumps(prefs, indent=2), encoding="utf-8")
+
     def set_pack_enabled(self, enabled: bool) -> None:
         """The checkbox. A server this launcher runs picks it up when it is next (re)started (see
         check_server)."""
-        prefs = self._prefs()
-        prefs["use_pack"] = enabled
-        self.data_dir.mkdir(parents=True, exist_ok=True)
-        self._prefs_path().write_text(json.dumps(prefs, indent=2), encoding="utf-8")
+        self._save_prefs(use_pack=enabled)
         log.info("game-data pack %s", "on" if enabled else "off")
+
+    # ---- where the server is (the server row; remembered, applied at the next Play) --------------------
+    def mode(self) -> str:
+        """LOCAL, HOST or JOIN; without a choice yet, what launcher.toml says."""
+        mode = self._prefs().get("mode")
+        if mode in (LOCAL, HOST, JOIN):
+            return mode
+        return LOCAL if self.base_cfg.server_mode == "local" else JOIN
+
+    def join_address(self) -> str:
+        return str(self._prefs().get("join_address") or
+                   (self.base_cfg.server_address if self.base_cfg.server_mode != "local" else ""))
+
+    def host_address(self) -> str:
+        """This PC's address for the other players (the chosen one if it still exists, else the main one)."""
+        addresses = network.lan_addresses()
+        chosen = self._prefs().get("host_address")
+        return chosen if chosen in addresses else (addresses[0] if addresses else "")
+
+    def set_mode(self, mode: str, join_address: str | None = None, host_address: str | None = None) -> None:
+        changes: dict = {"mode": mode}
+        if join_address is not None:
+            changes["join_address"] = join_address.strip()
+        if host_address is not None:
+            changes["host_address"] = host_address
+        self._save_prefs(**changes)
+        if not (self.thread and self.thread.is_alive()):
+            self.cfg = self.effective_cfg()
+        log.info("server: %s %s", mode, changes.get("join_address") or changes.get("host_address") or "")
+
+    def effective_cfg(self) -> LauncherConfig:
+        mode = self.mode()
+        if mode == JOIN:
+            return replace(self.base_cfg, server_mode="remote", server_address=self.join_address() or "127.0.0.1")
+        address = self.base_cfg.server_address if self.base_cfg.server_mode == "local" else "127.0.0.1"
+        return replace(self.base_cfg, server_mode="local", server_address=address)
+
+    def own_addresses(self, st: dict | None) -> set[str]:
+        """Addresses this PC's game and Connect may show up with in the status (besides "you"): on the server
+        PC also the server's public address (the game reaches the game server there)."""
+        if self.cfg.server_mode != "local":
+            return set()
+        return {"127.0.0.1", str((st or {}).get("public_host") or "")} - {""}
+
+    # ---- the account on the server ---------------------------------------------------------------------
+    def _account_key(self) -> str:
+        return f"{self.cfg.server_address}:{self.cfg.server_https_port}"
+
+    def account(self) -> account.Account | None:
+        saved = (self._prefs().get("accounts") or {}).get(self._account_key())
+        return account.Account(saved["email"], saved["name"]) if saved else None
+
+    def _remember_account(self, acc: account.Account | None) -> None:
+        accounts = dict(self._prefs().get("accounts") or {})
+        if acc:
+            accounts[self._account_key()] = {"email": acc.email, "name": acc.name}
+        else:
+            accounts.pop(self._account_key(), None)
+        self._save_prefs(accounts=accounts)
+
+    @property
+    def ca_path(self) -> Path:
+        return self.data_dir / "server-ca.pem"
+
+    def account_action(self, what: str, **kw) -> account.Account:
+        """register / sign_in / change_email / change_password / rename (for the account row and step); raises
+        account.AccountError with a text for the player. The result is remembered (not the password)."""
+        acc = getattr(account, what)(self.cfg, self.ca_path, **kw)
+        self._remember_account(acc)
+        log.info("account: %s done (%s)", what, acc.name)
+        return acc
+
+    def sign_out(self) -> None:
+        self._remember_account(None)
+
+    def request(self, kind: str, info: dict | None = None) -> dict | None:
+        """Ask the UI for input (blocks the worker thread until answered); None if cancelled or no UI."""
+        return self.dialog(kind, info or {}) if self.dialog else None
 
     def wanted_pack(self) -> bool:
         info = self.pack_info()
         return bool(info and info.installed and info.enabled)
 
     def check_server(self) -> bool:
+        if self.mode() == JOIN and not network.valid_address(self.join_address()):
+            self.set("server", FAILED, "enter the address of the PC that hosts the server (Join, above)")
+            return False
+        host_for = None
+        if self.mode() == HOST:
+            host_for = self.host_address()
+            if not host_for:
+                self.set("server", FAILED, "this PC has no address in a local network, so nobody can join it")
+                return False
         self.set("server", RUNNING, f"reaching {self.cfg.server_address}")
         st = server.status(self.cfg)
-        if st is not None and self.server_proc and self.server_proc.running() \
-                and (self.pack_changed or bool(st.get("gamedata")) != self.wanted_pack()):
-            self.set("server", RUNNING, "restarting the local server (game-data pack changed)")
-            self.server_proc.stop()
-            self.server_proc = None
-            st = None
+        if st is not None and self.server_proc and self.server_proc.running():
+            why = "game-data pack changed" if self.pack_changed or bool(st.get("gamedata")) != self.wanted_pack() \
+                else "hosting changed" if self.server_proc.host_for != host_for else ""
+            if why:
+                self.set("server", RUNNING, f"restarting the local server ({why})")
+                self.server_proc.stop()
+                self.server_proc = None
+                st = None
+        elif st is not None and self.cfg.server_mode == "local" and host_for \
+                and st.get("public_host") != host_for:
+            self.set("server", FAILED, "a server the launcher did not start is running here, not set up for "
+                                       "hosting: stop it (or set bind and public_host in its config.toml)")
+            return False
         self.pack_changed = False
         if st is None and self.cfg.server_mode == "local":
             srv = self.server_config().server
             needed = [ports.Port(srv.https_port, "TCP", "HTTPS"), ports.Port(srv.crl_port, "TCP", "certificate list"),
                       ports.Port(srv.nex_port, "UDP", "game server")]
-            while taken := ports.busy(srv.bind, needed):
+            while taken := ports.busy("0.0.0.0" if host_for else srv.bind, needed):
                 self.ask("server", "The local server cannot start: " + "; ".join(taken) + ". Close that program "
                          "(or change the port in config.toml), then check again.", ["Check again"])
             self.server_proc = server.ServerProcess(self.cfg)
-            self.server_proc.start(self.data_dir / "logs", use_pack=self.wanted_pack())
-            self.set("server", RUNNING, "starting the local server")
+            self.server_proc.start(self.data_dir / "logs", use_pack=self.wanted_pack(), host_for=host_for)
+            self.set("server", RUNNING, "starting the local server" + (f" for this network ({host_for})"
+                                                                      if host_for else ""))
             st = server.wait_up(self.cfg, 30, alive=self.server_proc.running)
         if st is None:
             where = "local server did not start (see logs)" if self.cfg.server_mode == "local" else \
-                f"no server answers at {self.cfg.server_address}:{self.cfg.server_https_port}"
+                f"no server answers at {self.cfg.server_address}:{self.cfg.server_https_port} (is it running " \
+                "there, and is its PC hosting with the firewall rule added?)"
             self.set("server", FAILED, where)
             return False
         theirs = str(st.get("version", "?"))
@@ -309,9 +423,87 @@ class Session:
             self.ask("server", f"The server runs Powder {theirs}, this launcher is Powder {__version__}. Different "
                      "major versions may not work together; update the older one.", ["Continue anyway"])
         started = " (run by the launcher)" if self.server_proc else " (already running)"
+        hosting = f"; others join with {host_for}" if host_for else ""
         self.set("server", OK, f"{self.cfg.server_address}{started}, Powder {theirs}, "
-                               f"{st.get('players', 0)} player(s)")
+                               f"{st.get('players', 0)} player(s){hosting}")
         return True
+
+    def check_firewall(self) -> bool:
+        mode = self.mode()
+        if mode == LOCAL:
+            self.set("firewall", OK, "nothing needed (only this PC plays on the server)")
+            return True
+        srv = self.server_config().server
+        needed = firewall.Needed(
+            server_ports=((srv.https_port, "TCP"), (srv.crl_port, "TCP"), (srv.nex_port, "UDP")) if mode == HOST
+            else (), game_exe=self.install.exe if self.install else None)
+        ignore_blocks = False
+        while True:
+            self.set("firewall", RUNNING, "checking Windows Firewall")
+            game_rules = firewall.for_program(needed.game_exe) if needed.game_exe else []
+            blocks = firewall.blocked(game_rules)
+            if blocks and not ignore_blocks:
+                names = ", ".join(f'"{r.name}"' for r in blocks[:3])
+                if self.ask("firewall", f"Windows Firewall blocks Steep for incoming connections (rule {names}, "
+                            "e.g. from a Windows prompt answered with Cancel). A block rule wins over any allow rule, "
+                            "so the other players' games can't reach this one. Turn that rule off in Windows "
+                            "Security > Firewall & network protection > Advanced settings > Inbound Rules, then "
+                            "check again.", ["Check again", "Continue anyway"]) == "Check again":
+                    continue
+                ignore_blocks = True
+            missing = needed.missing(firewall.ours(), game_rules)
+            if not missing:
+                self.set("firewall", OK, "other PCs in the network can reach " +
+                         ("the server and the game" if mode == HOST else "the game"))
+                return True
+            what = []
+            if firewall.SERVER_RULE in missing:
+                what.append("The server's ports (" + ", ".join(f"{p}/{k}" for p, k in needed.server_ports) +
+                            ") let the other PCs reach the server.")
+            if firewall.GAME_RULE in missing:
+                what.append("Steep itself (UDP) lets the games connect to each other directly.")
+            choice = self.ask("firewall", FIREWALL_WHY.format(what=" ".join(what)), ["Add firewall rules", "Skip"])
+            if choice == "Skip":
+                self.set("firewall", OK, "skipped: other PCs may not be able to reach this one")
+                return True
+            code = firewall.add(needed, missing)
+            if code != 0:
+                self.set("firewall", RUNNING, "firewall not changed" + (" (declined)" if code == -1 else
+                                                                         f" (error {code})"))
+                self.wait(1.5)
+
+    def check_account(self) -> bool:
+        st = server.status(self.cfg)
+        if st is not None and "accounts" not in st:
+            self.set("account", OK, "this server has no accounts (an older Powder)")
+            return True
+        acc = self.account()
+        if acc:
+            self.set("account", OK, f"{acc.name} ({acc.email})")
+            return True
+        try:
+            takes = account.takes_over(self.cfg, self.ca_path)
+        except account.AccountError:
+            takes = None
+        intro = ("Every player on this server has their own account (email and password), also used to sign in to "
+                 "Ubisoft Connect. Register one, or sign in if you already have one on this server.")
+        if takes:
+            intro += f" The first account on this server takes over the existing player {takes} and its progress."
+        text = intro
+        while True:
+            choice = self.ask("account", text, ["Register…", "Sign in…"])
+            kind = "register" if choice == "Register…" else "sign_in"
+            answers = self.request(kind, {"takes_over": takes})
+            if not answers:
+                text = intro
+                continue
+            try:
+                acc = self.account_action(kind, **answers)
+            except account.AccountError as e:
+                text = f"{e} {intro}"
+                continue
+            self.set("account", OK, f"{acc.name} ({acc.email})")
+            return True
 
     def check_dns(self) -> bool:
         addr = self.cfg.server_address
@@ -354,12 +546,26 @@ class Session:
         self.set("cert", OK, "trusted for this Windows user")
         return True
 
+    def my_connect(self, st: dict | None) -> list[dict]:
+        """This PC's Ubisoft Connect clients signed in to the server (not another player's)."""
+        return server.mine(st, "connect", self.own_addresses(st))
+
     def check_connect(self) -> bool:
         st = server.status(self.cfg)
-        if connect.logged_in(st):
-            self.set("connect", OK, f"signed in ({st['connect'][0]['player']})")
+        acc = self.account()
+        mine = self.my_connect(st)
+        if mine and (not acc or any(c.get("player") == acc.name for c in mine)):
+            self.set("connect", OK, f"signed in ({mine[0]['player']})")
             return True
-        if connect.running():
+        sign_in = (f"sign in with {acc.email} and your account's password" if acc else
+                   "log in if it asks; any email/password works")
+        if mine:
+            # signed in as another player (e.g. the account was switched): sign in again with this one
+            self.ask("connect", f"Ubisoft Connect is signed in as {mine[0]['player']}, not as {acc.name}. It needs "
+                     f"a restart; then sign in with {acc.email} (if it signs in by itself as {mine[0]['player']}, "
+                     "sign out in Ubisoft Connect first).", ["Restart Ubisoft Connect"])
+            connect.quit_connect()
+        elif connect.running():
             # started before the redirect, signed in to Ubisoft, or connected to a server that has since
             # stopped (it does not reconnect by itself): it has to restart against this server
             self.ask("connect", "Ubisoft Connect is running but not signed in to this server. It needs a restart.",
@@ -368,12 +574,11 @@ class Session:
         connect.start(self.paths["connect"])
         deadline = time.monotonic() + 600
         while time.monotonic() < deadline:
-            self.set("connect", RUNNING, "waiting for Ubisoft Connect to sign in (log in if it asks; "
-                                         "any email/password works)")
+            self.set("connect", RUNNING, f"waiting for Ubisoft Connect to sign in ({sign_in})")
             self.wait(2)
-            st = server.status(self.cfg)
-            if connect.logged_in(st):
-                self.set("connect", OK, f"signed in ({st['connect'][0]['player']})")
+            mine = self.my_connect(server.status(self.cfg))
+            if mine:
+                self.set("connect", OK, f"signed in ({mine[0]['player']})")
                 return True
         self.set("connect", FAILED, "Ubisoft Connect did not sign in within 10 minutes")
         return False
@@ -466,7 +671,7 @@ class Session:
             children |= {p.pid for p in procs if p.parent_pid == pid}
             observer.poll()
             st = server.status(self.cfg)
-            if not online and st and st.get("game"):
+            if not online and server.mine(st, "game", self.own_addresses(st)):
                 online = True
                 self.set("game", OK, "online on the server - have fun")
             self.wait(1 if time.monotonic() - started < 30 else 2)
@@ -559,6 +764,26 @@ class Session:
         left = trust.installed_cas()
         self.set("cert", FAILED if left else OK, f"{len(left)} server certificate(s) still trusted" if left else
                  f"removed {len(cas)} server certificate(s)")
+        return True
+
+    def restore_firewall(self) -> bool:
+        rules = firewall.ours()
+        if not rules:
+            self.set("firewall", OK, "no firewall rules of the launcher")
+            return True
+        names = sorted({r.name for r in rules})
+        while firewall.ours():
+            if self.ask("firewall", "Windows Firewall has the launcher's rules for playing on the local network ("
+                        + ", ".join(names) + "). Removing them needs admin rights: when you click \"Remove rules\", "
+                        "Windows asks for permission (UAC). Only these rules are removed.",
+                        ["Remove rules", "Skip"]) == "Skip":
+                self.set("firewall", FAILED, "skipped: the launcher's firewall rules are still there")
+                return True
+            code = firewall.remove_ours()
+            if code != 0:
+                self.set("firewall", RUNNING, "not removed" + (" (declined)" if code == -1 else f" (error {code})"))
+                self.wait(1.5)
+        self.set("firewall", OK, f"removed {len(names)} firewall rule(s)")
         return True
 
     def restore_check(self) -> bool:
