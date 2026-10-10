@@ -100,6 +100,27 @@ async def test_a_save_goes_up_and_comes_back(client, services):
     assert not services.cloudsaves.path(me, PRODUCT, "2").exists()
 
 
+async def test_steeps_two_versions_share_one_save(client, services):
+    """Ubisoft Connect version (3279) and Steam version (3280): one cloud save, under the name asked for."""
+    me = services.default_player_id()
+    body = {**entity_body(), "name": "upcCloudSaveUplayId_3279"}
+    created = await (await client.post(f"/v1/profiles/{me}/entities", headers=UBI, json=body)).json()
+    assert created["name"] == "upcCloudSaveUplayId_3279"
+    assert services.entities.get(created["entityId"])["name"] == NAME               # kept under 3280
+    for slot in ("1", "2"):
+        link = services.cloudsaves.resolve(services.cloudsaves.link(me, 3279, slot), 3279, slot)
+        services.cloudsaves.store(link, b"slot " + slot.encode(), None)
+    steam = (await (await client.get(f"/v1/profiles/{me}/entities?name={NAME}", headers=UBI)).json())["entities"]
+    assert steam[0]["entityId"] == created["entityId"] and steam[0]["name"] == NAME
+    token = services.cloudsaves.link(me, PRODUCT, "1", method="GET")
+    assert await (await client.get(f"/_powder/cloudsaves/{PRODUCT}/1?t={token}", headers=UBI)).read() == b"slot 1"
+    # a second upload keeps the first as <slot>.prev
+    link = services.cloudsaves.resolve(services.cloudsaves.link(me, PRODUCT, "1"), PRODUCT, "1")
+    services.cloudsaves.store(link, b"newer", None)
+    path = services.cloudsaves.path(me, PRODUCT, "1")
+    assert path.read_bytes() == b"newer" and path.with_suffix(".prev").read_bytes() == b"slot 1"
+
+
 async def test_a_damaged_upload_never_replaces_a_stored_file(client, services):
     me = services.default_player_id()
     (_, link), = upload_links(services, me, {"1": b"good data"})

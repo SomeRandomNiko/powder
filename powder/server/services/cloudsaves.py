@@ -31,6 +31,14 @@ TYPE = "cloudSave"
 NAME = re.compile(r"^upcCloudSaveUplayId_(\d{1,10})$")
 SLOT = re.compile(r"^[A-Za-z0-9_-]{1,32}$")
 LINK_LIFETIME_S = 3600
+# One cloud save for several products: Steep's Ubisoft Connect version (3279) and Steam version (3280) keep
+# their saves in the same format (same header and slot layout), so a player keeps one save across both.
+SHARED = {3279: 3280}
+
+
+def shared(product: int) -> int:
+    """The product a cloud save is kept under."""
+    return SHARED.get(int(product), int(product))
 
 
 def entity_name(product: int) -> str:
@@ -59,7 +67,7 @@ class CloudSaveService:
 
     # ---- the entity -------------------------------------------------------------------------------
     def entity(self, profile_id: str, product: int) -> dict | None:
-        name = entity_name(product)
+        name = entity_name(shared(product))
         return next((e for e in self.repos.entities.for_profile(profile_id.lower(), TYPE) if e.get("name") == name),
                     None)
 
@@ -85,13 +93,13 @@ class CloudSaveService:
         if not self.complete(profile_id, product, e):
             log.warning("cloud save of %s (product %d) is incomplete (files missing): not offered", profile_id, product)
             return None
-        return e
+        return {**e, "name": entity_name(product)}          # under the name Connect asked for (shared saves)
 
     # ---- files ------------------------------------------------------------------------------------
     def path(self, profile_id: str, product: int, slot: str) -> Path:
         if not SLOT.match(slot):
             raise CloudSaveError(f"bad slot name {slot!r}")
-        return self.root / profile_id.lower() / str(int(product)) / f"{slot}.savegame"
+        return self.root / profile_id.lower() / str(shared(product)) / f"{slot}.savegame"
 
     def link(self, profile_id: str, product: int, slot: str, md5: str | None = None, method: str = "PUT") -> str:
         """A one-hour token for one slot of this player's save: uploading (PUT), downloading (GET), DELETE."""
@@ -125,6 +133,8 @@ class CloudSaveService:
         path.parent.mkdir(parents=True, exist_ok=True)
         tmp = path.with_suffix(".part")
         tmp.write_bytes(data)
+        if path.exists():                                 # the previous upload stays, as <slot>.prev
+            os.replace(path, path.with_suffix(".prev"))
         os.replace(tmp, path)
         log.info("cloud save of %s: slot %s of product %d stored (%d B)", link.profile_id, link.slot, link.product,
                  len(data))
@@ -156,5 +166,7 @@ class CloudSaveService:
             folder = self.root / profile_id.lower() / str(item["product"])
             for f in folder.glob("*") if folder.exists() else ():
                 f.unlink()
+            if folder.exists():
+                folder.rmdir()
             n += 1
         return n

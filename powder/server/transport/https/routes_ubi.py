@@ -295,9 +295,11 @@ async def write_cloud_entity(request: web.Request) -> web.Response:
     services = request.app[SERVICES]
     entity_id = request.match_info.get("entity_id")
     slots = [(s.get("filename"), s.get("size")) for s in (body.get("obj") or {}).get("slots", []) if isinstance(s, dict)]
+    product = int(cloudsaves.NAME.match(body["name"]).group(1))
+    body = {**body, "name": cloudsaves.entity_name(cloudsaves.shared(product))}   # one save for shared products
     if entity_id is None:
-        log.info("cloud save entity created by %s: %s, slots %s", owner, body.get("name"), slots)
-        existing = services.cloudsaves.entity(owner, int(cloudsaves.NAME.match(body["name"]).group(1)))
+        log.info("cloud save entity created by %s: product %d, slots %s", owner, product, slots)
+        existing = services.cloudsaves.entity(owner, product)
         entity_id = existing["entityId"] if existing else str(uuid.uuid4())
     else:
         existing = services.entities.get(entity_id)
@@ -307,9 +309,10 @@ async def write_cloud_entity(request: web.Request) -> web.Response:
         if existing and body.get("revision") not in (None, existing.get("revision")):
             log.warning("cloud save of %s: revision %s written over %s", owner, body.get("revision"),
                         existing.get("revision"))
-        log.info("cloud save of %s updated: %s, slots %s", owner, body.get("name"), slots)
+        log.info("cloud save of %s updated: product %d, slots %s", owner, product, slots)
     e = services.entities.put(entity_id, {**body, "type": cloudsaves.TYPE}, owner)
-    return json_response(request, e, f"cloud-save-written(rev {e['revision']})")
+    return json_response(request, {**e, "name": cloudsaves.entity_name(product)},
+                         f"cloud-save-written(rev {e['revision']})")
 
 
 EMPTY_S3_LISTING = ('<?xml version="1.0" encoding="UTF-8"?>\n<ListBucketResult xmlns="http://s3.amazonaws.com/doc/'
