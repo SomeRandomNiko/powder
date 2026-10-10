@@ -111,6 +111,19 @@ def test_host_leaves_and_another_member_hosts(mm):
     assert mm.get_session(sid) is None
 
 
+def test_only_players_in_the_same_cell_meet(mm):
+    """A game leaves a session of another world cell right away (live): match per world and cell."""
+    own = mm.create_session_with_reserved_id(A, mm.reserve_session_id(A), 1, {}, urls("192.0.2.1"))
+    mm.create_match_ticket(A, own, 2, {**CRIT, "worldcell": 0}, (), 32)
+    own = mm.create_session_with_reserved_id(B, mm.reserve_session_id(B), 1, {}, urls("192.0.2.2"))
+    tb = mm.create_match_ticket(B, own, 2, {**CRIT, "worldcell": 1001}, (), 32)
+    assert mm.sent == []
+    mm.update_ticket(B, tb, {"worldcell": 0})               # B rides into A's cell
+    (pid, code, params), = mm.sent
+    assert (pid, code) == (A, CODE_HOST)
+    assert mm.get_session(params["session_id"]).attrs["worldcell"] == 0
+
+
 def test_tickets_ripen_before_they_are_matched():
     """A game drops a match proposal that arrives before it is searching: tickets are matched once they are
     old enough (Ubisoft's server took 110 s and more)."""

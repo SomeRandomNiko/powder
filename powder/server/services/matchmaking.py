@@ -14,8 +14,9 @@ How Steep uses it (from recordings of Ubisoft's server):
      URLs and everyone gets code 10 with the new host.
 A ticket is used up by a match; the game opens a new one after LeaveSession.
 
-Policy here: one world for everyone with the same world_id (worldcell is ignored for now, so two
-friends always meet), at most `max_size` players per session (what the ticket asks, 32).
+Policy here: players meet when their tickets name the same world_id and worldcell (a game leaves a
+session of another cell right after GetSession), at most `max_size` players per session (what the
+ticket asks, 32). The game opens a new ticket whenever its player moves into another cell.
 
 The service is synchronous and transport-free: notifications go through `notify(profile_id, code,
 params)`, which the server wires to NEX pushes (services/__init__.py).
@@ -86,6 +87,12 @@ class Ticket:
     def world(self):
         return self.criteria.get("world_id")
 
+    @property
+    def place(self) -> tuple:
+        """Where the player is: world and world cell. Only tickets of one place are matched; a game leaves a
+        session of another cell right after GetSession and opens a new ticket (seen live)."""
+        return self.criteria.get("world_id"), self.criteria.get("worldcell")
+
 
 def reachable_urls(urls: list[str]) -> list[str]:
     """Station URLs other PCs can use: loopback addresses dropped (unless that is all there is)."""
@@ -148,7 +155,10 @@ class MatchmakingService:
         t = self.tickets.get(ticket_id)
         if t is None or t.profile_id != profile_id:
             return
+        before = t.place
         t.criteria.update(criteria)
+        if t.place != before:
+            log.info("ticket %d from %s: now world %s, cell %s", t.id, profile_id, *t.place)
         self._match(t)
 
     def cancel_all_tickets(self, profile_id: str) -> None:
@@ -168,14 +178,15 @@ class MatchmakingService:
         # an existing session with a known host
         for s in sorted(self.sessions.values(), key=lambda s: s.created):
             if (s.type == SESSION_WORLD and s.host and s.host_urls and s.free and s.id not in t.excluded
-                    and t.profile_id not in s.members and s.attrs.get("world_id") == t.world):
+                    and t.profile_id not in s.members
+                    and (s.attrs.get("world_id"), s.attrs.get("worldcell")) == t.place):
                 self._add(s, t)
                 self._send_join(s, s.members[t.profile_id])
                 return
         # another waiting ticket: a new session, the older ticket's player hosts
         for other in sorted(self.tickets.values(), key=lambda o: o.monotonic):
             if (other is not t and other.profile_id != t.profile_id and other.session_type == SESSION_WORLD
-                    and other.world == t.world and self._ripe(other)
+                    and other.place == t.place and self._ripe(other)
                     and not self._in_world_session(other.profile_id)):
                 older, newer = (other, t) if other.monotonic <= t.monotonic else (t, other)
                 self._new_session(older, newer)
