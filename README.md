@@ -271,10 +271,10 @@ To host for the local network, choose **Host for others** in the launcher: it st
 `bind = "0.0.0.0"` and `public_host` in `config.toml` and allow the ports in Windows Firewall yourself.
 
 The players' games also talk to each other directly (UDP, peer-to-peer, ports the game picks). On a
-local network that needs nothing but the firewall rule for Steep. `[multiplayer] storm = "off"` (the
-default) keeps the game away from Ubisoft's peer-to-peer helper servers (NAT detection and traversal)
-that a game-data pack's configuration names; playing over the internet would need those, which Powder
-does not provide yet.
+local network that needs nothing but the firewall rule for Steep. The game only starts its multiplayer
+part when its configuration names peer-to-peer helper servers (Storm: NAT detection and traversal);
+for now they come from the game-data pack (`[multiplayer] storm = "pack"`, the default: Ubisoft's hosts
+as recorded), so multiplayer needs a pack. Powder does not provide those servers itself yet.
 
 ## Progression
 

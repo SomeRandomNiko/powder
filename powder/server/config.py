@@ -47,9 +47,9 @@ class PlayersConfig:
 
 @dataclass(frozen=True)
 class MultiplayerConfig:
-    storm: str = "off"                  # "off": the game gets no peer-to-peer (Storm) servers, also not the
-                                        # pack's (Ubisoft's NAT detection/traversal hosts); players on one
-                                        # LAN reach each other directly. "pack": the pack's settings as recorded
+    storm: str = "pack"                 # "pack": the pack's peer-to-peer (Storm) settings as recorded (Ubisoft's
+                                        # NAT detection/traversal hosts). "off": none, also not the pack's; the
+                                        # game then switches multiplayer off (never asks for a match)
 
 
 @dataclass(frozen=True)

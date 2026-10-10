@@ -25,9 +25,8 @@ strict_tickets = false      # true: refuse requests with tickets the server did 
 # "192.168.1.20" = "<profile id>"
 
 [multiplayer]
-storm = "off"               # "off": the game gets no peer-to-peer helper servers (players on one local
-                            # network reach each other directly); "pack": a game-data pack's settings as
-                            # recorded (Ubisoft's NAT detection/traversal hosts)
+storm = "pack"              # "pack": the game-data pack's peer-to-peer (Storm) settings as recorded
+                            # (Ubisoft's hosts); "off": none, and the game then switches multiplayer off
 
 [gameplay]
 unlimited_heli_tickets = false   # (planned)

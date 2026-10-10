@@ -47,6 +47,28 @@ def _for_player(build, how):
     return handler
 
 
+# Matchmaking map per world (tag WORLD_<world id in hex>): which version of the map the game should use
+# to place players into world cells for matchmaking. Without one the game never opens a match ticket.
+# The map data itself comes with the game; only the version is given here (unknown worlds: 1).
+MATCHMAKING_MAP_VERSIONS = {"WORLD_7a954c6bd0": 1, "WORLD_d6ce6d6c20": 1, "WORLD_10af88fa9e4": 3}
+
+
+def matchmaking_map(space_id: str, tag: str) -> dict:
+    version = MATCHMAKING_MAP_VERSIONS.get(tag, 1)
+    return {"entityId": str(uuid.uuid5(uuid.NAMESPACE_URL, f"powder:matchmaking-map:{tag}")), "spaceId": space_id,
+            "type": "TITLE_MATCHMAKING_MAP", "name": f"Matchmaking map v{version}", "tags": [tag],
+            "obj": {"version": version}, "lastModified": "2017-01-01T00:00:00.000Z", "revision": 1}
+
+
+async def space_entities(request: web.Request) -> web.Response:
+    """Game-wide entities: matchmaking maps (built in); player-made trail challenges are not kept (none)."""
+    entities = []
+    if request.query.get("type") == "TITLE_MATCHMAKING_MAP":
+        tags = [t for t in request.query.get("tags", "").split(",") if t.startswith("WORLD_")]
+        entities = [matchmaking_map(request.match_info["space"], t) for t in tags]
+    return json_response(request, {"entities": entities}, f"space-entities({len(entities)})")
+
+
 def _ok(payload, how):
     async def handler(request: web.Request) -> web.Response:
         return json_response(request, payload() if callable(payload) else payload, how)
@@ -275,8 +297,7 @@ def add_routes(app: web.Application) -> None:
     r.add_post("/v3/profiles/me/events", _ok({}, "events"))
     r.add_post("/v5/spaces/{space}/serviceEvents", _ok({}, "service-events"))
     r.add_get("/ugc/v1/", _ok([], "ugc"))
-    # game-wide entities: player-made trail challenges and matchmaking maps are not in the pack
-    r.add_get("/v2/spaces/{space}/entities", _ok({"entities": []}, "space-entities"))
+    r.add_get("/v2/spaces/{space}/entities", space_entities)
     r.add_route("*", "/ugc/v1/{ugc_id}/{action}", no_content)
     r.add_route("*", "/v2/connections/{tail:.*}", _ok({}, "notifications"))
     # Ubisoft Connect

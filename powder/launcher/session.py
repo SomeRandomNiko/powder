@@ -424,8 +424,9 @@ class Session:
                      "major versions may not work together; update the older one.", ["Continue anyway"])
         started = " (run by the launcher)" if self.server_proc else " (already running)"
         hosting = f"; others join with {host_for}" if host_for else ""
-        self.set("server", OK, f"{self.cfg.server_address}{started}, Powder {theirs}, "
-                               f"{st.get('players', 0)} player(s){hosting}")
+        online = sorted({g["player"] for g in st.get("game") or []})
+        self.set("server", OK, f"{self.cfg.server_address}{started}, Powder {theirs}, {st.get('players', 0)} "
+                               f"player(s) registered, in the game now: {', '.join(online) or 'nobody'}{hosting}")
         return True
 
     def check_firewall(self) -> bool:

@@ -189,3 +189,14 @@ async def test_connect_achievement_view(client, services):
     r = await client.post("/v1/profiles/me/uplay/graphql", headers=auth, json={
         "operationName": "GetAchievements", "variables": {"spaceId": "00000000-0000-0000-0000-000000000000"}})
     assert (await r.json())["data"]["game"]["viewer"]["meta"]["achievements"]["nodes"] == []
+
+
+async def test_matchmaking_map_for_the_world(client):
+    """Without a matchmaking map the game never opens a match ticket."""
+    r = await client.get(f"/v2/spaces/{SPACE_ID}/entities?type=TITLE_MATCHMAKING_MAP&tags=WORLD_10af88fa9e4"
+                         "&offset=0&limit=10", headers=UBI)
+    (entity,) = (await r.json())["entities"]
+    assert entity["type"] == "TITLE_MATCHMAKING_MAP" and entity["tags"] == ["WORLD_10af88fa9e4"]
+    assert entity["obj"] == {"version": 3} and entity["spaceId"] == SPACE_ID
+    r = await client.get(f"/v2/spaces/{SPACE_ID}/entities?tags=TRAIL,ACTIVATED&offset=0&limit=20", headers=UBI)
+    assert (await r.json())["entities"] == []
