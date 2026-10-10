@@ -7,9 +7,10 @@ links {creationTimestamp, expirationTimestamp, urls {Thumbnail, Data}}, ...}; PU
 PUT {id}/download answer 204. The files were on Amazon S3 behind signed links; here they are on this
 server (/_powder/ugc/<id>[_thumbnail]).
 
-Seen live: a photo is created with POST /ugc/v1/ {typeId 2, worldId, metadata, tags, datas: the JPEG,
-base64}; it is kept as the item's file (served as Data and as Thumbnail), not in the item. Deleting is
-DELETE {id} followed by PUT {id}/hide. {id}/url comes from the game's code (no recording).
+Seen live: a photo is created with POST /ugc/v1/ {typeId 2, worldId, metadata (world position, region,
+time of day, camera settings, ...), tags, datas: the JPEG, Thumbnail: a small JPEG, both base64}; the two
+pictures are kept as the item's files (Data, Thumbnail), not in the item. The JPEGs themselves carry no
+metadata. Deleting is DELETE {id} followed by PUT {id}/hide. {id}/url comes from the game's code.
 """
 from __future__ import annotations
 
@@ -29,6 +30,7 @@ from .routes_ubi import json_response
 log = logging.getLogger("powder.https")
 FILE_NAME = re.compile(r"^[0-9a-f-]{36}(_thumbnail)?$")
 LINK_LIFETIME_S = 3600
+FILE_FIELDS = {"datas": "", "Thumbnail": "_thumbnail"}     # inline pictures of a created item -> file suffix
 
 
 def _me(request: web.Request) -> str:
@@ -44,7 +46,7 @@ def _links(request: web.Request, ugc_id: str) -> dict:
 
 
 def _out(request: web.Request, item: dict) -> dict:
-    extra = {k: v for k, v in item["extra"].items() if k != "datas"}        # a file, not part of the item
+    extra = {k: v for k, v in item["extra"].items() if k not in FILE_FIELDS}   # files, not part of the item
     return {**extra, "id": item["ugc_id"], "typeId": item["type_id"], "worldId": item["world_id"],
             "profileId": item["profile_id"], "pubDate": item["pub_date"], "metadata": item["metadata"],
             "likeCounter": item["likes"], "downloadCounter": item["downloads"],
@@ -71,6 +73,19 @@ def _files(request: web.Request):
     return request.app[DATA_DIR] / "ugc"
 
 
+def _save_inline(request: web.Request, name: str, value) -> None:
+    """A base64 picture sent inside the item -> its file."""
+    if not isinstance(value, str):
+        return
+    try:
+        data = base64.b64decode(value)
+    except (binascii.Error, ValueError):
+        return
+    if data:
+        _files(request).mkdir(parents=True, exist_ok=True)
+        (_files(request) / name).write_bytes(data)
+
+
 async def ugc_create(request: web.Request) -> web.Response:
     raw = await request.read()
     try:
@@ -79,7 +94,7 @@ async def ugc_create(request: web.Request) -> web.Response:
         body = {}
     if not isinstance(body, dict):
         body = {}
-    datas = body.pop("datas", None)
+    pictures = {field: body.pop(field, None) for field in FILE_FIELDS}
     log.info("ugc create from %s (%d B): %s", _me(request), len(raw), json.dumps(body)[:1500])
     metadata = body.get("metadata") if isinstance(body.get("metadata"), dict) else {}
     type_id = _int(body.get("typeId", body.get("type_id"))) or 0
@@ -89,14 +104,8 @@ async def ugc_create(request: web.Request) -> web.Response:
     extra = {k: v for k, v in body.items() if k not in known}
     item = request.app[SERVICES].repos.ugc.create(str(uuid.uuid4()), type_id, world_id, _me(request), metadata,
                                                     tags, extra)
-    if isinstance(datas, str):
-        try:
-            data = base64.b64decode(datas, validate=False)
-        except (binascii.Error, ValueError):
-            data = b""
-        if data:
-            _files(request).mkdir(parents=True, exist_ok=True)
-            (_files(request) / item["ugc_id"]).write_bytes(data)
+    for field, suffix in FILE_FIELDS.items():
+        _save_inline(request, item["ugc_id"] + suffix, pictures[field])
     log.info("ugc %s created (type %d, world %s) by %s", item["ugc_id"], type_id, world_id, _me(request))
     return json_response(request, _out(request, item), "ugc-created")
 
@@ -143,15 +152,9 @@ async def ugc_file(request: web.Request) -> web.StreamResponse:
     if item is None:
         return web.Response(status=404)
     path = _files(request) / name
-    original = _files(request) / item["ugc_id"]
-    if not original.exists() and isinstance(item["extra"].get("datas"), str):     # stored before files were
-        try:
-            data = base64.b64decode(item["extra"]["datas"])
-        except (binascii.Error, ValueError):
-            data = b""
-        if data:
-            original.parent.mkdir(parents=True, exist_ok=True)
-            original.write_bytes(data)
+    for field, suffix in FILE_FIELDS.items():                   # stored inside the item before files were
+        if not (_files(request) / (item["ugc_id"] + suffix)).exists():
+            _save_inline(request, item["ugc_id"] + suffix, item["extra"].get(field))
     if request.method == "GET" and name.endswith("_thumbnail") and not path.exists():
         path = _files(request) / name.split("_")[0]          # a photo is its own thumbnail
     if request.method in ("PUT", "POST"):

@@ -39,17 +39,19 @@ async def test_a_photo_round_trip(client, services):
 
 
 async def test_a_photo_as_the_game_uploads_it(client, services):
-    """Seen live: the JPEG comes inline (datas, base64); it is a file, never part of the listed item."""
+    """Seen live: the JPEG and a thumbnail come inline (datas, Thumbnail; base64); they are files, never part
+    of the item."""
     import base64
     r = await client.post("/ugc/v1/", headers=OLYMPUS, json={
         "typeId": 2, "worldId": WORLD, "metadata": {"worldId": WORLD}, "tags": ["Ski", "Selfie"],
-        "datas": base64.b64encode(b"\xff\xd8JPEG").decode()})
+        "datas": base64.b64encode(b"\xff\xd8JPEG").decode(), "Thumbnail": base64.b64encode(b"\xff\xd8SMALL").decode()})
     item = await r.json()
-    assert "datas" not in item and item["tags"] == ["Ski", "Selfie"]
-    for url in item["links"]["urls"].values():                     # Data and Thumbnail: the photo
-        assert await (await client.get(url.split(".com", 1)[1], headers=OLYMPUS)).read() == b"\xff\xd8JPEG"
+    assert "datas" not in item and "Thumbnail" not in item and item["tags"] == ["Ski", "Selfie"]
+    urls = item["links"]["urls"]
+    assert await (await client.get(urls["Data"].split(".com", 1)[1], headers=OLYMPUS)).read() == b"\xff\xd8JPEG"
+    assert await (await client.get(urls["Thumbnail"].split(".com", 1)[1], headers=OLYMPUS)).read() == b"\xff\xd8SMALL"
     listed = await (await client.get(f"/ugc/v1/?algo=Steep&type_id=2&world_id={WORLD}", headers=OLYMPUS)).json()
-    assert "datas" not in listed[0]
+    assert not {"datas", "Thumbnail"} & set(listed[0])
     assert (await client.delete(f"/ugc/v1/{item['id']}", headers=OLYMPUS)).status == 204
     assert (await client.put(f"/ugc/v1/{item['id']}/hide", headers=OLYMPUS)).status == 204    # as the game does
     assert (await client.get(item["links"]["urls"]["Data"].split(".com", 1)[1], headers=OLYMPUS)).status == 404
