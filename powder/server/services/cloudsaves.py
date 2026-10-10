@@ -143,7 +143,10 @@ class CloudSaveService:
         path = self.path(link.profile_id, link.product, link.slot)
         if not path.exists():
             raise CloudSaveError(f"slot {link.slot} not stored")
-        return path.read_bytes()
+        data = path.read_bytes()
+        log.info("cloud save of %s: slot %s of product %d downloaded (%d B)", link.profile_id, link.slot, link.product,
+                 len(data))
+        return data
 
     # ---- admin ------------------------------------------------------------------------------------
     def all(self, profile_id: str | None = None) -> list[dict]:
