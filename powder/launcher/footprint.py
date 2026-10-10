@@ -5,7 +5,6 @@ and Steep are listed because they must be closed first. Things the launcher neve
 rules of the dev tools) are not part of this."""
 from __future__ import annotations
 
-import subprocess
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -56,7 +55,7 @@ def scan(cfg: LauncherConfig) -> Footprint:
         cas = []
     try:
         rules = sorted({r.name for r in firewall.ours()})
-    except (OSError, subprocess.SubprocessError):           # no PowerShell (not Windows)
+    except firewall.FirewallError:                          # no PowerShell (not Windows)
         rules = []
     running = connect.running()
     st = server.status(cfg, timeout=1.0) if running else None

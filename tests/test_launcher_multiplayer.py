@@ -117,7 +117,7 @@ def test_joining_needs_only_the_game_rule_and_this_pc_only_none(tmp_path, monkey
 def test_a_block_rule_for_steep_is_reported(tmp_path, monkeypatch):
     pc = FakePC()
     pc.install(monkeypatch)
-    pc.game_rules = [firewall.Rule("Steep", "Block", True, str(GAME))]
+    pc.game_rules = [firewall.Rule("Steep", "Block", True, firewall.norm(GAME).lower())]
     s = Scripted(LauncherConfig(), tmp_path, answers=["Continue anyway", "Skip"])
     s.install = type("I", (), {"exe": GAME})()
     s.set_mode(JOIN, join_address="192.0.2.10")
@@ -139,11 +139,32 @@ def test_restore_removes_our_firewall_rules(tmp_path, monkeypatch):
 
 
 def test_firewall_script_allows_only_the_local_network():
-    script = firewall.add_script(firewall.Needed(((443, "TCP"), (80, "TCP"), (6005, "UDP")), GAME),
-                                 [firewall.SERVER_RULE, firewall.GAME_RULE])
-    assert script.count("New-NetFirewallRule") == 3 and script.count("-RemoteAddress LocalSubnet") == 3
-    assert "-LocalPort 443,80" in script and "-LocalPort 6005" in script and "-Group 'Powder'" in script
-    assert f"-Program '{GAME}'" in script
+    script = firewall.add_script([firewall.Program(GAME, firewall.GAME_RULE, ("UDP",))])
+    assert script.count("New-NetFirewallRule") == 1 and "-RemoteAddress LocalSubnet" in script
+    assert "-Group 'Powder'" in script and f"-Program '{GAME}'" in script and "Remove-NetFirewallRule" in script
+
+
+def test_firewall_rule_matching():
+    steep = firewall.Program(GAME, firewall.GAME_RULE, ("UDP",))
+    exe = firewall.norm(GAME).lower()
+    tcp_only = firewall.Rule("x", "Allow", True, exe, protocol="TCP")
+    assert not firewall.allowed(steep, [tcp_only], [])
+    assert firewall.allowed(steep, [tcp_only, firewall.Rule("y", "Allow", True, exe, protocol="UDP")], [])
+    public_only = firewall.Rule("z", "Allow", True, exe, profile="Public")
+    assert firewall.allowed(steep, [public_only], ["Public"])
+    assert not firewall.allowed(steep, [public_only], ["Private"])
+    assert not firewall.allowed(steep, [firewall.Rule("off", "Allow", False, exe)], [])
+    assert firewall.blocked(steep, [firewall.Rule("b", "Block", True, exe, profile="Private")], ["Private"])
+
+
+def test_play_keeps_its_server_setup_while_the_row_changes(tmp_path, monkeypatch):
+    monkeypatch.setattr(network, "lan_addresses", lambda: ["192.0.2.10"])
+    s = Scripted(LauncherConfig(), tmp_path)
+    s.set_mode(HOST)
+    setup = s.setup
+    s.thread = type("T", (), {"is_alive": lambda self: True})()       # a Play run in progress
+    s.set_mode(JOIN, join_address="192.0.2.99")
+    assert s.setup == setup and s.cfg.server_mode == "local"
 
 
 def test_account_step_registers_and_remembers_no_password(tmp_path, monkeypatch):

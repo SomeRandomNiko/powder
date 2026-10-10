@@ -201,15 +201,16 @@ Without a choice, `server_mode` and `server_address` in `launcher.toml` decide. 
 
 1. **Game files**: finds the chosen Steep, Ubisoft Connect (and Steam for the Steam version), and checks
    that `Steep.exe` is a build the TLS helper supports.
-2. **Server**: reaches it, or starts it locally (Just this PC / Host) after checking that its ports are
+2. **Firewall** (hosting or joining): Windows Firewall must let the other PCs in. The host needs a rule
+   for Powder's server program, every player one for Steep itself (the games connect to each other
+   directly). Rules are per program, since Windows asks about any program that listens without one. Both
+   allow only the local network. If one is missing, the launcher explains it and adds it after you press
+   the button (Windows asks for admin rights), before the server starts listening. It also warns if a rule
+   from an earlier Windows prompt blocks Steep or Powder.
+3. **Server**: reaches it, or starts it locally (Just this PC / Host) after checking that its ports are
    free (if not, it names the program using them), with or without the game-data pack as the checkbox says
    (a server it started with another setting is restarted). Joining, it uses the server on the other PC
    (its pack is that server's business), and warns if that server's major version differs.
-3. **Firewall** (hosting or joining): Windows Firewall must let the other PCs in. The host needs a rule
-   for the server's ports, every player one for Steep itself (the games connect to each other directly).
-   Both allow only the local network. If one is missing, the launcher explains it and adds it after you
-   press the button (Windows asks for admin rights). It also warns if a rule from an earlier Windows prompt
-   blocks Steep.
 4. **DNS**: every Ubisoft hostname (`powder/server/hostnames.py`) must resolve to the server address. If not,
    it shows the lines to add to your own DNS server, or adds them to the hosts file for you (the previous
    hosts file is backed up to `data/launcher/hosts-backups/`).
@@ -268,7 +269,7 @@ Installed, Powder's folder is `%LOCALAPPDATA%\Powder`; from source, the current 
 All three are set in `config.toml`. By default the server only listens on this PC (`bind = "127.0.0.1"`).
 To host for the local network, choose **Host for others** in the launcher: it starts the server with
 `--bind 0.0.0.0 --public-host <this PC's address>` and adds the firewall rule. Without the launcher, set
-`bind = "0.0.0.0"` and `public_host` in `config.toml` and allow the ports in Windows Firewall yourself.
+`bind = "0.0.0.0"` and `public_host` in `config.toml` and allow the server in Windows Firewall yourself.
 
 The players' games also talk to each other directly (UDP, peer-to-peer, ports the game picks). On a
 local network that needs nothing but the firewall rule for Steep. The game only starts its multiplayer

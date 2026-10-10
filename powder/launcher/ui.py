@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import ctypes
 import queue
+import threading
 import tkinter as tk
 from pathlib import Path
 from tkinter import filedialog, messagebox, ttk
@@ -89,8 +90,19 @@ class AccountDialog(tk.Toplevel):
         self.destroy()
 
     @classmethod
-    def ask(cls, parent, kind: str, info: dict) -> dict | None:
+    def ask(cls, parent, kind: str, info: dict, cancel=None) -> dict | None:
+        """The answers, or None. `cancel` (an Event): closes the dialog when set (Play was cancelled)."""
         d = cls(parent, kind, info)
+
+        def watch():
+            if not d.winfo_exists():
+                return
+            if cancel.is_set():
+                d.destroy()
+            else:
+                d.after(300, watch)
+        if cancel is not None:
+            watch()
         parent.wait_window(d)
         return d.result
 
@@ -205,28 +217,52 @@ class LauncherWindow:
             tk.Label(self.account_bar, text="none on this server yet (Play asks for it)", fg="gray").pack(
                 side="left", padx=8)
 
+    def in_background(self, work, done) -> None:
+        """Run `work` (talks to the server, may take seconds) off the UI thread, then `done(result, error)` in it."""
+        def run():
+            try:
+                result, error = work(), None
+            except Exception as e:                           # noqa: BLE001 - handed to done()
+                result, error = None, e
+            self.root.after(0, lambda: done(result, error))
+        self.account_bar.configure(cursor="watch")
+        threading.Thread(target=run, daemon=True).start()
+
     def account_change(self, what: str) -> None:
         acc = self.session.account()
         info = {"email": acc.email if acc else "", "name": acc.name if acc else ""}
-        if what == "register":
-            try:
-                info["takes_over"] = account.takes_over(self.session.cfg, self.session.ca_path)
-            except account.AccountError:
-                pass
-        answers = AccountDialog.ask(self.root, what, info)
-        if not answers:
-            return
-        if acc and what not in ("register", "sign_in"):
-            answers["email"] = acc.email
-        try:
-            self.session.account_action(what, **answers)
-        except account.AccountError as e:
-            messagebox.showerror("Account", str(e))
-        else:
-            if what == "change_password":
+
+        def ask(takes_over, _error):
+            if takes_over:
+                info["takes_over"] = takes_over
+            self.account_bar.configure(cursor="")
+            answers = AccountDialog.ask(self.root, what, info)
+            if not answers:
+                return
+            if acc and what not in ("register", "sign_in"):
+                answers["email"] = acc.email
+            self.in_background(lambda: self.session.account_action(what, **answers), finished)
+
+        def finished(_acc, error):
+            self.account_bar.configure(cursor="")
+            if isinstance(error, account.AccountError):
+                messagebox.showerror("Account", str(error))
+            elif error:
+                messagebox.showerror("Account", f"Error: {error}")
+            elif what == "change_password":
                 messagebox.showinfo("Account", "Password changed. Ubisoft Connect asks for the new one the next "
                                                "time it signs in.")
-        self.render_account()
+            self.render_account()
+
+        if what == "register":
+            self.in_background(lambda: account.takes_over(self.session.cfg, self.session.ca_path), ask)
+        else:
+            ask(None, None)
+
+    def play(self, install) -> None:
+        """Play: first take what the server row shows (an address typed but not yet confirmed counts)."""
+        self.mode_changed()
+        self.session.start(install)
 
     def sign_out(self) -> None:
         if messagebox.askyesno("Account", "Forget the account on this PC? (It stays on the server; sign in again "
@@ -239,7 +275,7 @@ class LauncherWindow:
         answer: queue.Queue = queue.Queue()
 
         def show():
-            answer.put(AccountDialog.ask(self.root, kind, info))
+            answer.put(AccountDialog.ask(self.root, kind, info, cancel=self.session.cancel))
             self.render_account()
         self.root.after(0, show)
         while True:
@@ -302,7 +338,7 @@ class LauncherWindow:
         for w in self.play_bar.winfo_children():
             w.destroy()
         for label, install in buttons:
-            ttk.Button(self.play_bar, text=label, command=lambda i=install: self.session.start(i)).pack(
+            ttk.Button(self.play_bar, text=label, command=lambda i=install: self.play(i)).pack(
                 side="left", padx=(0, 4))
         self.shown_buttons = [label for label, _ in buttons]
 

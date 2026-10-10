@@ -2,7 +2,7 @@
 something when needed; when it needs the user (hosts entries, certificate, restarting Connect) it shows
 the choices and waits for one. The UI only renders steps and forwards button clicks.
 
-Play:            game files -> server -> firewall -> DNS -> certificate -> account -> Ubisoft Connect -> game
+Play:            game files -> firewall -> server -> DNS -> certificate -> account -> Ubisoft Connect -> game
 Restore system:  Steep closed -> server stopped -> Connect quit -> hosts entries removed -> CA removed ->
                  firewall rules removed -> check
 
@@ -27,6 +27,7 @@ from powder.server import trust
 from powder.server.config import Config as ServerSettings
 from powder.server.gamedata import pack
 
+from .. import paths
 from ..version import __version__, compatible
 from . import account, attach, certs, connect, dns, elevate, firewall, footprint, game, locate, network, ports, server
 from .config import LauncherConfig
@@ -42,8 +43,8 @@ ONLINE, OFFLINE, STARTER, CRASHED, CLOSED_EARLY = "online", "offline", "starter"
 HOSTS_ADMIN_WHY = ("Changing the hosts file needs admin rights because it is a protected Windows system file: "
                    "when you click \"{button}\", Windows asks for permission (UAC). Only these lines are {verb}, "
                    "and the current file is backed up first.")
-FIREWALL_WHY = ("Windows Firewall lets other PCs reach this one only for programs and ports it was told about. "
-                "{what} Both rules allow only PCs in your local network. Adding them needs admin rights: when you "
+FIREWALL_WHY = ("Windows Firewall lets other PCs reach this one only for programs it was told about. "
+                "{what} The rules allow only PCs in your local network. Adding them needs admin rights: when you "
                 "click \"Add firewall rules\", Windows asks for permission (UAC). Restore system removes them again.")
 LOCAL, HOST, JOIN = "local", "host", "join"      # where the server is (the server row)
 
@@ -62,8 +63,16 @@ class Cancelled(Exception):
     pass
 
 
+@dataclass(frozen=True)
+class ServerSetup:
+    """Where the server is, as the server row says: LOCAL, HOST (for host_for, this PC's address) or JOIN."""
+    mode: str
+    host_for: str = ""
+    join: str = ""
+
+
 def play_steps() -> list[Step]:
-    return [Step("files", "Game files"), Step("server", "Server"), Step("firewall", "Firewall"),
+    return [Step("files", "Game files"), Step("firewall", "Firewall"), Step("server", "Server"),
             Step("dns", "DNS / hosts"), Step("cert", "Certificate"), Step("account", "Account"),
             Step("connect", "Ubisoft Connect"), Step("game", "Steep")]
 
@@ -100,7 +109,8 @@ def restore_steps() -> list[Step]:
 class Session:
     def __init__(self, cfg: LauncherConfig, data_dir: Path, on_update: Callable[[], None] = lambda: None):
         self.base_cfg, self.data_dir, self.on_update = cfg, data_dir, on_update
-        self.cfg = self.effective_cfg()                 # launcher.toml + the server row's choice
+        self.setup = self.server_setup()                # the server row's choice (fixed during a Play run)
+        self.cfg = self.effective_cfg(self.setup)       # launcher.toml + that choice
         # the UI's way to ask for input (account dialogs): (kind, info) -> answers or None if cancelled
         self.dialog: Callable[[str, dict], dict | None] | None = None
         self.steps = play_steps()
@@ -161,8 +171,11 @@ class Session:
         if self.thread and self.thread.is_alive():
             return
         self.chosen = install
-        self.cfg = self.effective_cfg()
-        self._launch(play_steps(), (self.check_files, self.check_server, self.check_firewall, self.check_dns,
+        self.setup = self.server_setup()                 # fixed for this run, whatever the row shows meanwhile
+        self.cfg = self.effective_cfg(self.setup)
+        # the firewall comes before the server: a server listening for the network without a rule for its
+        # program would make Windows ask, unannounced
+        self._launch(play_steps(), (self.check_files, self.check_firewall, self.check_server, self.check_dns,
                                     self.check_cert, self.check_account, self.check_connect, self.run_game))
 
     def restore(self) -> None:
@@ -193,6 +206,10 @@ class Session:
             log.exception("launcher step failed")
             running = next((s for s in self.steps if s.state in (RUNNING, ACTION)), self.steps[-1])
             self.set(running.key, FAILED, f"error: {e}")
+        finally:                                        # the server row may have changed during the run
+            self.setup = self.server_setup()
+            self.cfg = self.effective_cfg(self.setup)
+            self.on_update()
 
     # ---- steps ------------------------------------------------------------------------------------
     def pick_install(self) -> locate.Install | None:
@@ -317,14 +334,19 @@ class Session:
         if host_address is not None:
             changes["host_address"] = host_address
         self._save_prefs(**changes)
-        if not (self.thread and self.thread.is_alive()):
-            self.cfg = self.effective_cfg()
+        if not (self.thread and self.thread.is_alive()):            # a running Play keeps its setup
+            self.setup = self.server_setup()
+            self.cfg = self.effective_cfg(self.setup)
         log.info("server: %s %s", mode, changes.get("join_address") or changes.get("host_address") or "")
 
-    def effective_cfg(self) -> LauncherConfig:
+    def server_setup(self) -> ServerSetup:
         mode = self.mode()
-        if mode == JOIN:
-            return replace(self.base_cfg, server_mode="remote", server_address=self.join_address() or "127.0.0.1")
+        return ServerSetup(mode, host_for=self.host_address() if mode == HOST else "",
+                           join=self.join_address() if mode == JOIN else "")
+
+    def effective_cfg(self, setup: ServerSetup) -> LauncherConfig:
+        if setup.mode == JOIN:
+            return replace(self.base_cfg, server_mode="remote", server_address=setup.join or "127.0.0.1")
         address = self.base_cfg.server_address if self.base_cfg.server_mode == "local" else "127.0.0.1"
         return replace(self.base_cfg, server_mode="local", server_address=address)
 
@@ -353,7 +375,8 @@ class Session:
 
     @property
     def ca_path(self) -> Path:
-        return self.data_dir / "server-ca.pem"
+        """The CA of the server played on (each server has its own; account calls are checked against it)."""
+        return self.data_dir / f"server-ca-{self._account_key().replace(':', '_')}.pem"
 
     def account_action(self, what: str, **kw) -> account.Account:
         """register / sign_in / change_email / change_password / rename (for the account row and step); raises
@@ -375,15 +398,14 @@ class Session:
         return bool(info and info.installed and info.enabled)
 
     def check_server(self) -> bool:
-        if self.mode() == JOIN and not network.valid_address(self.join_address()):
+        setup = self.setup
+        if setup.mode == JOIN and not network.valid_address(setup.join):
             self.set("server", FAILED, "enter the address of the PC that hosts the server (Join, above)")
             return False
-        host_for = None
-        if self.mode() == HOST:
-            host_for = self.host_address()
-            if not host_for:
-                self.set("server", FAILED, "this PC has no address in a local network, so nobody can join it")
-                return False
+        host_for = setup.host_for or None
+        if setup.mode == HOST and not host_for:
+            self.set("server", FAILED, "this PC has no address in a local network, so nobody can join it")
+            return False
         self.set("server", RUNNING, f"reaching {self.cfg.server_address}")
         st = server.status(self.cfg)
         if st is not None and self.server_proc and self.server_proc.running():
@@ -429,45 +451,57 @@ class Session:
                                f"player(s) registered, in the game now: {', '.join(online) or 'nobody'}{hosting}")
         return True
 
+    def firewall_programs(self) -> list[firewall.Program]:
+        """What the other PCs must reach: the game, and when hosting Powder's server program."""
+        programs = []
+        if self.setup.mode == HOST:
+            programs.append(firewall.Program(Path(paths.self_command()[0]), firewall.SERVER_RULE, ("TCP", "UDP")))
+        if self.install:
+            programs.append(firewall.Program(self.install.exe, firewall.GAME_RULE, ("UDP",)))
+        return programs
+
     def check_firewall(self) -> bool:
-        mode = self.mode()
-        if mode == LOCAL:
+        if self.setup.mode == LOCAL:
             self.set("firewall", OK, "nothing needed (only this PC plays on the server)")
             return True
-        srv = self.server_config().server
-        needed = firewall.Needed(
-            server_ports=((srv.https_port, "TCP"), (srv.crl_port, "TCP"), (srv.nex_port, "UDP")) if mode == HOST
-            else (), game_exe=self.install.exe if self.install else None)
+        programs = self.firewall_programs()
         ignore_blocks = False
         while True:
             self.set("firewall", RUNNING, "checking Windows Firewall")
-            game_rules = firewall.for_program(needed.game_exe) if needed.game_exe else []
-            blocks = firewall.blocked(game_rules)
+            try:
+                rules, categories = firewall.rules_for(programs)
+            except firewall.FirewallError as e:
+                if self.ask("firewall", f"{e}. Other PCs may not be able to reach this one.",
+                            ["Check again", "Continue anyway"]) == "Continue anyway":
+                    self.set("firewall", OK, "not checked: the firewall rules could not be read")
+                    return True
+                continue
+            blocks = [r for p in programs for r in firewall.blocked(p, rules, categories)]
             if blocks and not ignore_blocks:
                 names = ", ".join(f'"{r.name}"' for r in blocks[:3])
-                if self.ask("firewall", f"Windows Firewall blocks Steep for incoming connections (rule {names}, "
-                            "e.g. from a Windows prompt answered with Cancel). A block rule wins over any allow rule, "
-                            "so the other players' games can't reach this one. Turn that rule off in Windows "
-                            "Security > Firewall & network protection > Advanced settings > Inbound Rules, then "
-                            "check again.", ["Check again", "Continue anyway"]) == "Check again":
+                if self.ask("firewall", f"Windows Firewall blocks {'Powder or ' if len(programs) > 1 else ''}Steep "
+                            f"for incoming connections (rule {names}, e.g. from a Windows prompt answered with "
+                            "Cancel). A block rule wins over any allow rule, so the other PCs can't reach this one. "
+                            "Turn that rule off in Windows Security > Firewall & network protection > Advanced "
+                            "settings > Inbound Rules, then check again.",
+                            ["Check again", "Continue anyway"]) == "Check again":
                     continue
                 ignore_blocks = True
-            missing = needed.missing(firewall.ours(), game_rules)
+            missing = [p for p in programs if not firewall.allowed(p, rules, categories)]
             if not missing:
                 self.set("firewall", OK, "other PCs in the network can reach " +
-                         ("the server and the game" if mode == HOST else "the game"))
+                         ("the server and the game" if self.setup.mode == HOST else "the game"))
                 return True
             what = []
-            if firewall.SERVER_RULE in missing:
-                what.append("The server's ports (" + ", ".join(f"{p}/{k}" for p, k in needed.server_ports) +
-                            ") let the other PCs reach the server.")
-            if firewall.GAME_RULE in missing:
-                what.append("Steep itself (UDP) lets the games connect to each other directly.")
+            if any(p.rule == firewall.SERVER_RULE for p in missing):
+                what.append("Powder's server lets the other PCs reach it.")
+            if any(p.rule == firewall.GAME_RULE for p in missing):
+                what.append("Steep itself lets the games connect to each other directly.")
             choice = self.ask("firewall", FIREWALL_WHY.format(what=" ".join(what)), ["Add firewall rules", "Skip"])
             if choice == "Skip":
                 self.set("firewall", OK, "skipped: other PCs may not be able to reach this one")
                 return True
-            code = firewall.add(needed, missing)
+            code = firewall.add(missing)
             if code != 0:
                 self.set("firewall", RUNNING, "firewall not changed" + (" (declined)" if code == -1 else
                                                                          f" (error {code})"))
@@ -536,7 +570,7 @@ class Session:
         if not pem:
             self.set("cert", FAILED, "the server did not provide its CA certificate")
             return False
-        ca = certs.save_ca(pem, self.data_dir)
+        ca = certs.save_ca(pem, self.ca_path)
         while not certs.is_trusted(ca):
             self.ask("cert", certs.EXPLANATION, ["Install certificate"])
             try:
@@ -578,6 +612,11 @@ class Session:
             self.set("connect", RUNNING, f"waiting for Ubisoft Connect to sign in ({sign_in})")
             self.wait(2)
             mine = self.my_connect(server.status(self.cfg))
+            if mine and acc and not any(c.get("player") == acc.name for c in mine):
+                self.set("connect", RUNNING, f"Ubisoft Connect signed in as {mine[0]['player']}, not as {acc.name}: "
+                         f"sign out in Ubisoft Connect, then sign in with {acc.email}")
+                self.wait(3)
+                continue
             if mine:
                 self.set("connect", OK, f"signed in ({mine[0]['player']})")
                 return True
@@ -768,12 +807,20 @@ class Session:
         return True
 
     def restore_firewall(self) -> bool:
-        rules = firewall.ours()
+        def current() -> list[firewall.Rule] | None:
+            try:
+                return firewall.ours()
+            except firewall.FirewallError as e:
+                self.set("firewall", FAILED, f"{e}; check Windows Firewall for rules of the group \"Powder\"")
+                return None
+        rules = current()
+        if rules is None:
+            return True
         if not rules:
             self.set("firewall", OK, "no firewall rules of the launcher")
             return True
         names = sorted({r.name for r in rules})
-        while firewall.ours():
+        while rules:
             if self.ask("firewall", "Windows Firewall has the launcher's rules for playing on the local network ("
                         + ", ".join(names) + "). Removing them needs admin rights: when you click \"Remove rules\", "
                         "Windows asks for permission (UAC). Only these rules are removed.",
@@ -784,6 +831,9 @@ class Session:
             if code != 0:
                 self.set("firewall", RUNNING, "not removed" + (" (declined)" if code == -1 else f" (error {code})"))
                 self.wait(1.5)
+            rules = current()
+            if rules is None:
+                return True
         self.set("firewall", OK, f"removed {len(names)} firewall rule(s)")
         return True
 

@@ -15,9 +15,8 @@ EXPLANATION = (
     "removes it again.")
 
 
-def save_ca(pem: bytes, data_dir: Path) -> Path:
-    data_dir.mkdir(parents=True, exist_ok=True)
-    path = data_dir / "server-ca.pem"
+def save_ca(pem: bytes, path: Path) -> Path:
+    path.parent.mkdir(parents=True, exist_ok=True)
     path.write_bytes(pem)
     return path
 
