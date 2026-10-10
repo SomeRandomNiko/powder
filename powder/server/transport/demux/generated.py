@@ -1,6 +1,6 @@
 """Ubisoft Connect demux replies built by the server (formats from the real service's replies).
 
-  friends_service   initialize -> no friends; presence updates and acks -> success
+  friends_service   initialize -> every other player of the server; presence updates and acks -> success
   playtime_service  -> success
   ownership_service Steam proof-of-purchase registration -> success; ownership token for a product ->
                     a fresh opaque token (Connect only passes it on; this server is the only validator)
@@ -13,6 +13,7 @@ import base64
 import logging
 import secrets
 
+from ...services.friends import friends_of
 from . import pb
 from .services import ServiceContext, ServiceRequest, handler, make_reply
 
@@ -26,7 +27,17 @@ def _success(reply_kind: int):
 
 
 # friends: 22 initialize (reply 22: {1 result, 2 friend...}), 13 / 19 presence and status updates
-handler("friends_service", 22)(_success(22))
+@handler("friends_service", 22)
+def friends_initialize(ctx: ServiceContext, req: ServiceRequest) -> bytes:
+    """The friends list: every other player of the server (services/friends.py). An entry as recorded:
+    {1: 0, 2: {1 profile id, 2 name, 3 empty, 4 0}, 3: 3} (a friend; type 1 entries without a name, state 0,
+    are another relationship and not used)."""
+    entries = [(2, [(1, 0), (2, [(1, f.profile_id), (2, f.name), (3, b""), (4, 0)]), (3, 3)])
+               for f in friends_of(ctx.services, ctx.profile_id)]
+    log.info("friends list for %s: %d friend(s)", ctx.profile_id, len(entries))
+    return make_reply(req, 22, [(1, 1), *entries])
+
+
 handler("friends_service", 13)(_success(13))
 handler("friends_service", 19)(_success(19))
 

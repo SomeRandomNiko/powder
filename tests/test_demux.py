@@ -257,3 +257,26 @@ def test_achievement_names_from_the_pack():
     assets = Assets(connect_http=HttpFixtures([zip_entry]))
     assert assets.achievement_names() == {1: ("First run", "Do something"), 2: ("Second", "Do more")}
     assert assets.achievement_names("xx-XX") == {} and Assets().achievement_names() == {}
+
+
+def test_every_other_player_is_a_friend(services, player):
+    """Connect's friends list: everyone with an account on the server (Steep takes its friends from Connect)."""
+    from powder.server.transport.demux.services import ServiceContext, answer
+    me = services.accounts.register("host@example.com", "correct horse", "")
+    guest = services.accounts.register("guest@example.com", "correct horse", "Guest")
+    request = pb.encode([(1, [(1, 4), (22, [(1, 1)])])])
+
+    def friends(profile_id):
+        reply = pb.decode(pb.first(pb.decode(answer(ServiceContext(services, profile_id), "friends_service",
+                                                    request)), 1))
+        body = pb.decode(pb.first(reply, 22))
+        assert pb.first(reply, 1) == 4 and pb.first(body, 1) == 1
+        out = []
+        for _, entry, _ in [f for f in body if f[0] == 2]:
+            e = pb.decode(entry)
+            who = pb.decode(pb.first(e, 2))
+            assert pb.first(e, 1) == 0 and pb.first(e, 3) == 3
+            out.append((pb.text(who, 1), pb.text(who, 2)))
+        return out
+    assert friends(me.profile_id) == [(guest.profile_id, "Guest")]
+    assert friends(guest.profile_id) == [(me.profile_id, synthetic.PLAYER_NAME)]
