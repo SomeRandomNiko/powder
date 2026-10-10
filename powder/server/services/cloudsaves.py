@@ -6,6 +6,8 @@ How Connect does it (recorded): at game start it reads the "cloudSave" entity up
 the entity (PUT /v1/profiles/entities/<id>: obj {slots [{id, filename, hash, size, lastModified}],
 timestamp, pc_name}) and then asks the demux cloudsave_service for upload links, one per slot, and uploads
 each file there. The files are stored as they come (Connect transforms them; it reads them back itself).
+The service's protobuf definitions come from Connect itself (mg.protocol.cloudsave_service): the link
+request names a method, Put / Get / Delete, so downloads and deletions ask for links the same way.
 
 Safety: an entity is only shown while every slot it lists has its file here, so Connect never tries to
 download a save that is not complete; an upload replaces a stored file only when it arrived whole (MD5 as
@@ -41,6 +43,7 @@ class Link:
     product: int
     slot: str
     expires: float
+    method: str = "PUT"                 # what the link allows: PUT (upload), GET (download), DELETE
     md5: str | None = None              # base64 MD5 announced for an upload
 
 
@@ -90,21 +93,27 @@ class CloudSaveService:
             raise CloudSaveError(f"bad slot name {slot!r}")
         return self.root / profile_id.lower() / str(int(product)) / f"{slot}.savegame"
 
-    def link(self, profile_id: str, product: int, slot: str, md5: str | None = None) -> str:
-        """A one-hour token for uploading (md5 given) or downloading one slot of this player's save."""
+    def link(self, profile_id: str, product: int, slot: str, md5: str | None = None, method: str = "PUT") -> str:
+        """A one-hour token for one slot of this player's save: uploading (PUT), downloading (GET), DELETE."""
         self.path(profile_id, product, slot)                 # validates the slot name
         now = self.clock()
         for t in [t for t, l in self.links.items() if l.expires < now]:
             del self.links[t]
         token = secrets.token_urlsafe(24)
-        self.links[token] = Link(profile_id.lower(), int(product), slot, now + LINK_LIFETIME_S, md5)
+        self.links[token] = Link(profile_id.lower(), int(product), slot, now + LINK_LIFETIME_S, method, md5)
         return token
 
-    def resolve(self, token: str, product: int, slot: str) -> Link:
+    def resolve(self, token: str, product: int, slot: str, method: str | None = None) -> Link:
         link = self.links.get(token or "")
         if link is None or link.expires < self.clock() or link.product != int(product) or link.slot != slot:
             raise CloudSaveError("unknown or expired link")
+        if method is not None and {"HEAD": "GET"}.get(method, method) != link.method:
+            raise CloudSaveError(f"link is for {link.method}, not {method}")
         return link
+
+    def remove(self, link: Link) -> None:
+        self.path(link.profile_id, link.product, link.slot).unlink(missing_ok=True)
+        log.info("cloud save of %s: slot %s of product %d deleted", link.profile_id, link.slot, link.product)
 
     def store(self, link: Link, data: bytes, content_md5: str | None) -> None:
         expected = content_md5 or link.md5

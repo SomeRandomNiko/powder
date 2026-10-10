@@ -2,10 +2,11 @@
 
   friends_service   initialize -> every other player of the server; presence updates and acks -> success
   playtime_service  -> success
-  ownership_service Steam proof-of-purchase registration -> success; ownership token for a product ->
-                    a fresh opaque token (Connect only passes it on; this server is the only validator)
+  ownership_service Steam proof-of-purchase registration -> success; a game's Uplay ticket, ownership token
+                    and signature -> fresh opaque values
+                    (Connect only passes them on; this server is the only validator)
   ach_frontend      earned achievements per player: stored when Connect writes them, returned when it reads
-  cloudsave_service links for uploading the game's save files to this server (services/cloudsaves.py)
+  cloudsave_service links for uploading, downloading and deleting cloud saves on this server (services/cloudsaves.py)
 Owned games (ownership_service initialize) are in ownership.py.
 """
 from __future__ import annotations
@@ -13,6 +14,7 @@ from __future__ import annotations
 import base64
 import logging
 import secrets
+import time
 
 from ...services.cloudsaves import CloudSaveError
 from ...services.friends import friends_of
@@ -43,34 +45,60 @@ def friends_initialize(ctx: ServiceContext, req: ServiceRequest) -> bytes:
 handler("friends_service", 13)(_success(13))
 handler("friends_service", 19)(_success(19))
 
-# cloud saves: 2 = upload links {2 product, 3 1, 4*: {1 slot, 2: {1 content length, 2 content-md5 (base64)}}}
-#   -> reply 2 {1 result, 2*: {1 "Content-Length: N\nContent-MD5: x\n" (headers to send), 2 URL}} (recorded;
-#   the URL was a presigned S3 PUT, here a link on this server). Downloading was not recorded: other kinds
-#   are logged as DEMUX UNHANDLED with their layout.
+# cloud saves (mg.protocol.cloudsave_service, definitions from Connect itself): 2 = CloudsaveUrlReq {1 ownership
+#   token, 2 uplay id (product), 3 method (1 Put, 2 Get, 3 Delete), 4*: Item {1 name, 2: {1 write length, 2 md5
+#   base64}}} -> 2 CloudsaveUrlRsp {1 status (1 Ok, 2 InternalError, 3 Denied), 2*: {1 header text, 2 url}}.
+#   Recorded for Put: header "Content-Length: N\nContent-MD5: x\n", url a presigned S3 link; here links on
+#   this server.
 CLOUD_FILES = "https://public-ubiservices.ubi.com/_powder/cloudsaves"
+CLOUD_METHODS = {1: "PUT", 2: "GET", 3: "DELETE"}
+CLOUD_OK, CLOUD_ERROR, CLOUD_DENIED = 1, 2, 3
 
 
 @handler("cloudsave_service", 2)
-def cloudsave_upload_links(ctx: ServiceContext, req: ServiceRequest) -> bytes:
+def cloudsave_links(ctx: ServiceContext, req: ServiceRequest) -> bytes:
     body = pb.try_decode(req.body) if isinstance(req.body, bytes) else None
-    product = pb.first(body, 2) if body else None
-    if not ctx.profile_id or not isinstance(product, int):
-        return make_reply(req, 2, [(1, 0)])
-    entries = []
+    product, method = (pb.first(body, 2), CLOUD_METHODS.get(pb.first(body, 3))) if body else (None, None)
+    if not ctx.profile_id or not isinstance(product, int) or method is None:
+        return make_reply(req, 2, [(1, CLOUD_DENIED)])
+    saves, entries = ctx.services.cloudsaves, []
     for _, raw, _ in [f for f in body if f[0] == 4]:
-        slot_msg = pb.try_decode(raw) or []
-        slot, meta = pb.text(slot_msg, 1), pb.try_decode(pb.first(slot_msg, 2, b"")) or []
+        item = pb.try_decode(raw) or []
+        slot, meta = pb.text(item, 1), pb.try_decode(pb.first(item, 2, b"")) or []
         length, md5 = pb.first(meta, 1), pb.text(meta, 2)
         try:
-            token = ctx.services.cloudsaves.link(ctx.profile_id, product, slot, md5 or None)
+            if method == "GET" and not saves.path(ctx.profile_id, product, slot).exists():
+                log.warning("cloud save of %s: slot %s of product %d asked for but not stored", ctx.profile_id,
+                            slot, product)
+                return make_reply(req, 2, [(1, CLOUD_ERROR)])
+            token = saves.link(ctx.profile_id, product, slot, md5 or None, method)
         except CloudSaveError as e:
-            log.warning("cloud save upload links for %s: %s", ctx.profile_id, e)
-            return make_reply(req, 2, [(1, 0)])
-        headers = (f"Content-Length: {length}\n" if isinstance(length, int) else "") + \
+            log.warning("cloud save links for %s: %s", ctx.profile_id, e)
+            return make_reply(req, 2, [(1, CLOUD_ERROR)])
+        headers = "" if method != "PUT" else (f"Content-Length: {length}\n" if isinstance(length, int) else "") + \
             (f"Content-MD5: {md5}\n" if md5 else "")
         entries.append((2, [(1, headers), (2, f"{CLOUD_FILES}/{product}/{slot}?t={token}")]))
-    log.info("cloud save of %s: %d upload link(s) for product %d", ctx.profile_id, len(entries), product)
-    return make_reply(req, 2, [(1, 1), *entries])
+    log.info("cloud save of %s: %d %s link(s) for product %d", ctx.profile_id, len(entries), method, product)
+    return make_reply(req, 2, [(1, CLOUD_OK), *entries])
+
+
+# ownership tokens and signatures (mg.protocol.ownership, definitions from Connect): 28 OwnershipTokenReq
+#   {1 product} -> 27 OwnershipTokenRsp {1 success, 2 token, 3 expiration}; 26 SignOwnershipReq {1 product} ->
+#   25 SignOwnershipRsp {1 success, 2 branch id, 3 expiration, 4 signature}. Connect needs them e.g. before a
+#   cloud save sync; it only passes them on to this server, which accepts any.
+OWNERSHIP_LIFETIME_S = 24 * 3600
+
+
+@handler("ownership_service", 28)
+def ownership_token(ctx: ServiceContext, req: ServiceRequest) -> bytes:
+    token = base64.urlsafe_b64encode(secrets.token_bytes(48)).decode().rstrip("=")
+    return make_reply(req, 27, [(1, 1), (2, token), (3, int(time.time()) + OWNERSHIP_LIFETIME_S)])
+
+
+@handler("ownership_service", 26)
+def ownership_signature(ctx: ServiceContext, req: ServiceRequest) -> bytes:
+    return make_reply(req, 25, [(1, 1), (2, 0), (3, int(time.time()) + OWNERSHIP_LIFETIME_S),
+                                (4, secrets.token_bytes(64))])
 
 
 # playtime: 2 = playtime report (reply 2: {1 result})
@@ -79,12 +107,12 @@ def playtime(ctx: ServiceContext, req: ServiceRequest) -> bytes:
     return make_reply(req, 2, [(1, 0)])
 
 
-# ownership: 19 = Steam proof-of-purchase registration (reply 18), 14 = ownership token (reply 13)
+# ownership: 19 = Steam proof-of-purchase registration (reply 18), 14 = GetUplayPCTicketReq (reply 13)
 handler("ownership_service", 19)(_success(18))
 
 
 @handler("ownership_service", 14)
-def ownership_token(ctx: ServiceContext, req: ServiceRequest) -> bytes:
+def uplay_pc_ticket(ctx: ServiceContext, req: ServiceRequest) -> bytes:
     token = base64.urlsafe_b64encode(secrets.token_bytes(420)).decode().rstrip("=")
     return make_reply(req, 13, [(1, 1), (2, token)])
 

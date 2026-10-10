@@ -317,7 +317,11 @@ async def cloud_save_file(request: web.Request) -> web.StreamResponse:
     services = request.app[SERVICES]
     try:
         link = services.cloudsaves.resolve(request.query.get("t", ""), int(request.match_info["product"]),
-                                           request.match_info["slot"])
+                                           request.match_info["slot"], request.method)
+        if request.method == "DELETE":
+            services.cloudsaves.remove(link)
+            request[HOW] = "cloud-save-delete"
+            return web.Response(status=204)
         if request.method == "PUT":
             services.cloudsaves.store(link, await request.read(), request.headers.get("Content-MD5"))
             request[HOW] = "cloud-save-upload"

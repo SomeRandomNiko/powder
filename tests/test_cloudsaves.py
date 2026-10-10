@@ -39,18 +39,29 @@ def md5(data: bytes) -> str:
     return base64.b64encode(hashlib.md5(data).digest()).decode()
 
 
-def upload_links(services, profile_id, files: dict[str, bytes]) -> list[tuple[str, str]]:
-    """The demux request Connect sends at game exit -> (headers text, URL) per slot."""
-    slots = [(4, [(1, name), (2, [(1, len(data)), (2, md5(data))])]) for name, data in files.items()]
-    request = pb.encode([(1, [(1, 9), (2, [(2, PRODUCT), (3, 1), *slots])])])
+def cloud_links(services, profile_id, items: list, method: int) -> tuple[int, list[tuple[str, str]]]:
+    """A CloudsaveUrlReq {1 token, 2 product, 3 method, 4* items} -> (status, [(header text, URL)])."""
+    request = pb.encode([(1, [(1, 9), (2, [(1, "ownership-token"), (2, PRODUCT), (3, method), *items])])])
     reply = pb.decode(pb.first(pb.decode(answer(ServiceContext(services, profile_id), "cloudsave_service",
                                                 request)), 1))
     body = pb.decode(pb.first(reply, 2))
-    assert pb.first(reply, 1) == 9 and pb.first(body, 1) == 1
+    assert pb.first(reply, 1) == 9
     out = []
     for _, raw, _ in [f for f in body if f[0] == 2]:
         e = pb.decode(raw)
         out.append((pb.text(e, 1), pb.text(e, 2)))
+    return pb.first(body, 1), out
+
+
+def download_links(services, profile_id, slots: list[str]):
+    return cloud_links(services, profile_id, [(4, [(1, s)]) for s in slots], 2)
+
+
+def upload_links(services, profile_id, files: dict[str, bytes]) -> list[tuple[str, str]]:
+    """The demux request Connect sends at game exit (method Put) -> (headers text, URL) per slot."""
+    slots = [(4, [(1, name), (2, [(1, len(data)), (2, md5(data))])]) for name, data in files.items()]
+    status, out = cloud_links(services, profile_id, slots, 1)
+    assert status == 1
     return out
 
 
@@ -75,10 +86,18 @@ async def test_a_save_goes_up_and_comes_back(client, services):
     put = await (await client.put(f"/v1/profiles/entities/{created['entityId']}", headers=UBI,
                                   json=entity_body(revision=1))).json()
     assert put["revision"] == 2
-    # another PC downloads with a link for that slot
-    token = services.cloudsaves.link(me, PRODUCT, "2")
-    r = await client.get(f"/_powder/cloudsaves/{PRODUCT}/2?t={token}", headers=UBI)
-    assert r.status == 200 and await r.read() == files["2"]
+    # another PC asks for download links (method Get) and downloads
+    status, got = download_links(services, me, ["1", "2"])
+    assert status == 1 and [h for h, _ in got] == ["", ""]
+    for (_, link), data in zip(got, files.values()):
+        r = await client.get(link.split(".com", 1)[1], headers=UBI)
+        assert r.status == 200 and await r.read() == data
+    assert (await client.put(got[0][1].split(".com", 1)[1], data=b"x", headers=UBI)).status == 403  # GET only
+    assert download_links(services, me, ["3"])[0] == 2                                # not stored: an error
+    # deleting (method Delete)
+    status, got = cloud_links(services, me, [(4, [(1, "2")])], 3)
+    assert status == 1 and (await client.delete(got[0][1].split(".com", 1)[1], headers=UBI)).status == 204
+    assert not services.cloudsaves.path(me, PRODUCT, "2").exists()
 
 
 async def test_a_damaged_upload_never_replaces_a_stored_file(client, services):
@@ -106,6 +125,16 @@ async def test_links_and_entities_belong_to_one_player(client, services):
     assert r.status == 403                                                            # not the requester's
     assert (await (await client.get(f"/v1/profiles/{other}/entities?name={NAME}", headers=UBI)).json()) == \
         {"entities": []}
+
+
+def test_ownership_token_and_signature(services, player):
+    """Connect asks for these (e.g. before a cloud save sync); definitions from Connect's mg.protocol.ownership."""
+    ctx = ServiceContext(services, services.default_player_id())
+    for kind, reply_kind in ((28, 27), (26, 25)):
+        reply = pb.decode(pb.first(pb.decode(answer(ctx, "ownership_service",
+                                                    pb.encode([(1, [(1, 5), (kind, [(1, PRODUCT)])])]))), 1))
+        body = pb.decode(pb.first(reply, reply_kind))
+        assert pb.first(body, 1) == 1 and pb.first(body, 3) > 0
 
 
 def test_admin_listing_and_deleting(services, player):
