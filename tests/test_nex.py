@@ -117,7 +117,11 @@ async def test_full_session(services, player, nex):
     assert resp.success and resp.method == "LoginProtocol::LoginWithToken_V1*"
     out = rmc.Reader(resp.body)
     assert out.guid() == uuid.UUID(player)
-    assert out.string().startswith("prudp:/address=127.0.0.1;") and out.bool() is False
+    url = out.string()
+    assert url.startswith("prudp:/address=127.0.0.1;") and out.bool() is False
+    # the game drops every server notification unless the station URL carries a non-zero DID
+    did = dict(kv.split("=", 1) for kv in url.split(":/", 1)[1].split(";"))["DID"]
+    assert int(did) > 0
     assert session.nex is not None                           # connection registered for server push
 
     # player statistics come from the database: level 41

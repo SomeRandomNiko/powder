@@ -114,7 +114,10 @@ class NexServer(asyncio.DatagramProtocol):
         log.info("%s:%d CONNECT, secure channel up", addr[0], addr[1])
 
     def station_url(self, c: PrudpConnection) -> str:
-        return (f"prudp:/address={self.public_host};port={self.port};CID=1;PID={c.pid};"
+        """The server's station URL in the LoginWithToken reply, as Ubisoft's: CID=1 and a DID that differs
+        per connection. The game keeps DID with the connection (FUN_7ff661b572df) and drops every
+        server-sent notification (ProcessNotificationEvent, e.g. matchmaking) while it is 0."""
+        return (f"prudp:/address={self.public_host};port={self.port};CID=1;DID={c.did};"
                 f"sid=1;stream=3;type=2")
 
     # ---- messages -------------------------------------------------------------------------------

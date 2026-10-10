@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import logging
 import os
+import secrets
 import time
 from dataclasses import dataclass, field
 from typing import Callable
@@ -36,7 +37,8 @@ def seq_before(a: int, b: int) -> bool:
 class PrudpConnection:
     addr: tuple[str, int]
     sendto: Callable[[bytes, tuple], None]
-    pid: int = 0                                  # our id for this connection (StationURL PID, NEX cid)
+    pid: int = 0                                  # our id for this connection (Register's connection id)
+    did: int = field(default_factory=lambda: secrets.randbelow(0x7FFFFFFF) + 1)   # StationURL DID, never 0
     client_stream: int = 0x3F
     server_stream: int = 0x31
     server_sig: bytes = field(default_factory=lambda: os.urandom(4))
