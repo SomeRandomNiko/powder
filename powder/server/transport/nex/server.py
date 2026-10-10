@@ -32,6 +32,7 @@ class NexServer(asyncio.DatagramProtocol):
         self.conns: dict[tuple, PrudpConnection] = {}
         self.transport: asyncio.DatagramTransport | None = None
         self._pids = itertools.count(0x1001)        # never reused, unlike the prototype's len(conns)
+        self._mm_tick = 0.0
         self._tasks: set[asyncio.Task] = set()
 
     # ---- asyncio plumbing ------------------------------------------------------------------------
@@ -155,6 +156,12 @@ class NexServer(asyncio.DatagramProtocol):
             for c in list(self.conns.values()):
                 if not c.tick(now):
                     self.drop(c, "timeout")
+            if now - self._mm_tick >= 1.0:                 # matchmaking: ripe tickets, retries
+                self._mm_tick = now
+                try:
+                    self.services.matchmaking.tick()
+                except Exception:  # noqa: BLE001 - must not stop the timers
+                    log.exception("matchmaking tick failed")
 
 
 async def start(services, dispatcher: RmcDispatcher, signing_key, bind: str, public_host: str,
