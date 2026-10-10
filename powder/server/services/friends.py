@@ -29,8 +29,17 @@ def friends_of(services, profile_id: str | None) -> list[Friend]:
                   key=lambda f: f.name.lower())
 
 
+def in_game(services) -> set[str]:
+    """Profile ids whose game is connected to the game server (NEX) right now, plus the players
+    [multiplayer] pretend_online names (testing invites alone)."""
+    now = {s.profile_id.lower() for s in services.sessions.by_player.values() if s.nex is not None}
+    pretend = {n.lower() for n in services.config.multiplayer.pretend_online}
+    if pretend:
+        now |= {p.profile_id for p in services.repos.players.all() if p.name.lower() in pretend}
+    return now
+
+
 def online_profiles(services) -> set[str]:
     """Profile ids whose Ubisoft Connect (demux) or game (NEX) is connected right now."""
     connect = {c.profile_id for c in services.connect_clients if c.profile_id}
-    game = {s.profile_id for s in services.sessions.by_player.values() if s.nex is not None}
-    return {p.lower() for p in connect | game}
+    return {p.lower() for p in connect} | in_game(services)

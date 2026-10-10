@@ -51,6 +51,8 @@ class MultiplayerConfig:
     storm: str = "powder"               # "powder": this server is the games' peer-to-peer helper (Storm: NAT
                                         # detection and traversal, transport/storm.py). "off": none (not even
                                         # a pack's Ubisoft hosts); the game then switches multiplayer off
+    pretend_online: tuple[str, ...] = ()  # testing alone: these players (names) look online in Steep, so
+                                          # the game offers to invite them
 
 
 @dataclass(frozen=True)
@@ -105,6 +107,7 @@ class Config:
                                 disabled=tuple(plugins_raw.get("disabled", ())))
 
         multiplayer = _build(MultiplayerConfig, raw.get("multiplayer", {}))
+        multiplayer = dataclasses.replace(multiplayer, pretend_online=tuple(multiplayer.pretend_online))
         if multiplayer.storm == "pack":                     # before Powder had its own: now the same
             multiplayer = dataclasses.replace(multiplayer, storm="powder")
         if multiplayer.storm not in ("off", "powder"):

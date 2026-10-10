@@ -189,6 +189,24 @@ async def test_every_other_player_is_a_friend(client, services):
     assert statuses["onlineStatuses"][0]["onlineStatus"] == "online"
 
 
+async def test_a_friend_in_steep_has_a_connection(client, services):
+    """The game asks which friends are in Steep (and only offers to invite those)."""
+    import dataclasses
+    guest = services.accounts.register("guest@example.com", "correct horse", "Guest")
+    url = f"/v1/profiles/connections?limit=24&offset=0&profileIds={guest.profile_id}&applications={APP_ID}"
+    assert (await (await client.get(url, headers=UBI)).json()) == {"connections": []}
+    session = services.sessions.issue(services.accounts.player(guest.profile_id), "192.0.2.20")
+    session.nex = object()                                                       # Guest's game is connected
+    (conn,) = (await (await client.get(url, headers=UBI)).json())["connections"]
+    assert conn["profileId"] == guest.profile_id and conn["applicationId"] == APP_ID
+    other_app = url.replace(APP_ID, "f68a4bb5-608a-4ff2-8123-be8ef797e0a6")
+    assert (await (await client.get(other_app, headers=UBI)).json()) == {"connections": []}
+    session.nex = None
+    services.config = dataclasses.replace(services.config, multiplayer=dataclasses.replace(
+        services.config.multiplayer, pretend_online=("guest",)))                 # testing alone
+    assert len((await (await client.get(url, headers=UBI)).json())["connections"]) == 1
+
+
 async def test_connect_achievement_view(client, services):
     """Ubisoft Connect's UI asks for achievements over GraphQL (batched): titles, icons and the player's
     unlocks come from the pack and the database."""

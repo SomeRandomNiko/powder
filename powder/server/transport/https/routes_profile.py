@@ -11,7 +11,7 @@ import uuid
 
 from aiohttp import web
 
-from ...constants import SPACE_ID
+from ...constants import APP_ID, SPACE_ID
 from ...services import friends
 from ...util import iso_now
 from .keys import HOW, SERVICES, SESSION
@@ -278,6 +278,31 @@ async def connect_friends(request: web.Request) -> web.Response:
     return json_response(request, {"groupId": str(uuid.uuid4()), "friends": out}, "friends")
 
 
+# what the game's connection asks to be told (as recorded); the game only checks that a friend has one
+STEEP_MESSAGE_TYPES = ["STEEP_LIVEREPLAY", "STEEP_SPECTATOR", "STEEP_MAINTENANCE", "US_APPLICATION_CONFIGURATION_UPDATE",
+                       "US_NOTIFICATION_MAINTENANCE", "US_CLIENT_SECONDARY_STORE_UPDATE", "CLUB_BADGE_ACQUIRED",
+                       "CLUB_CHALLENGE_COMPLETED", "CLUB_CHALLENGE_BANKED", "CLUB_CHALLENGE_PARTICIPATION",
+                       "CLUB_CHALLENGE_THRESHOLD_REACHED", "CLUB_PROGRESSION_REACHED", "CLUB_REWARD_PURCHASED"]
+
+
+async def profile_connections(request: web.Request) -> web.Response:
+    """GET /v1/profiles/connections?profileIds=..&applications=<Steep>: which friends are in Steep now (the game
+    asks every minute; only a friend with a connection is "online" in its social tab and can be invited)."""
+    wanted = [p.lower() for p in request.query.get("profileIds", "").split(",") if p]
+    apps = [a.lower() for a in request.query.get("applications", "").split(",") if a]
+    if apps and APP_ID not in apps:
+        return json_response(request, {"connections": []}, "connections")
+    playing, now = friends.in_game(_services(request)), iso_now()
+    return json_response(request, {"connections": [
+        {"profileId": pid, "connectionId": str(uuid.uuid5(uuid.NAMESPACE_URL, f"powder-connection/{pid}")),
+         "applicationId": APP_ID, "contactProtocol": "HTTP Post",
+         "contactUrl": f"https://public-im-ubiservices.ubi.com/v2/connections/powder/8180/{pid}/notifications",
+         "messageTypes": STEEP_MESSAGE_TYPES, "spaceIndependentMessageTypes": [], "obj": {}, "createdDate": now,
+         "lastModifiedDate": now, "processId": "powder", "spaceIds": [SPACE_ID], "stagingSpaceId": SPACE_ID,
+         "ubiLocaleCode": "en-US"}
+        for pid in wanted if pid in playing]}, "connections")
+
+
 async def club_title(request: web.Request) -> web.Response:
     pid = _pid(request)
     return json_response(request, {
@@ -308,7 +333,7 @@ def add_routes(app: web.Application) -> None:
     r.add_get("/v2/profiles/me/friends", game_friends)
     r.add_get("/v3/profiles", profiles_lookup)
     r.add_get("/v1/profiles/me/news", _ok({"news": []}, "news"))
-    r.add_get("/v1/profiles/connections", _ok({"connections": []}, "connections"))
+    r.add_get("/v1/profiles/connections", profile_connections)
     r.add_post("/v1/profiles/me/remotelog", remotelog)
     r.add_post("/v3/profiles/me/events", _ok({}, "events"))
     r.add_post("/v5/spaces/{space}/serviceEvents", _ok({}, "service-events"))

@@ -28,6 +28,7 @@ strict_tickets = false      # true: refuse requests with tickets the server did 
 [multiplayer]
 storm = "powder"            # "powder": this server is the games' peer-to-peer helper (Storm: NAT detection
                             # and traversal, on storm_port); "off": none, and the game switches multiplayer off
+# pretend_online = ["SomePlayer"]  # testing invites alone: these players look online in Steep
 
 [gameplay]
 unlimited_heli_tickets = false   # (planned)
