@@ -63,8 +63,8 @@ What Steep needs a server for, and how far Powder covers it.
 
 | Feature                                                  | Status | Notes                                                                     |
 | -------------------------------------------------------- | ------ | ------------------------------------------------------------------------- |
-| Multiplayer sessions (other riders in the world, groups) | 🟡     | Players in one world are put into one session (local network); no groups yet; not yet tested with two PCs |
-| Matchmaking                                              | 🟡     | Everyone in the same world meets (the area is not considered yet)                                         |
+| Multiplayer sessions (other riders in the world, groups) | 🟡     | On a local network: riders in the same area of a world see each other (tested with two PCs); no groups yet |
+| Matchmaking                                              | ✅     | Players in the same world and area (cell) are put into one session; no matchmaking map, the game splits areas itself |
 | Friends list, invites, blocks                            | ❌     | Always empty                                                              |
 | Other players' profiles (rider card, level)              | ❌     | Only your own                                                             |
 
