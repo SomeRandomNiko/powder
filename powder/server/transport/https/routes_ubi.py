@@ -31,24 +31,41 @@ def client_ip(request: web.Request) -> str:
     return peer[0] if peer else "127.0.0.1"
 
 
+def auth_refused(request: web.Request, message: str) -> web.Response:
+    """A refused sign-in, shaped like UbiServices' (Ubisoft Connect then asks for email and password)."""
+    return json_response(request, {"message": message, "errorCode": 1, "httpCode": 401,
+                                   "errorContext": "Profiles Client Facade Service", "moreInfo": "",
+                                   "transactionTime": iso_now(), "transactionId": secrets.token_hex(16)},
+                         "refused", 401)
+
+
 # ---- login --------------------------------------------------------------------------------------
 async def create_session(request: web.Request) -> web.Response:
     """POST /v3/profiles/sessions. The game authenticates with `uplaypc_v1 t=<Connect ticket>` (or
     `Basic` with empty credentials when Connect has none); we issue our own ticket, which it then
     sends as `Ubi_v1 t=` and as the NEX LoginWithToken token. Ubisoft Connect logs in here too
     (`rm_v1` remember-me ticket, `Ubi_v1` refresh, or `Basic` email:password on a fresh sign-in):
-    every credential is accepted, the account resolver decides who it is. Passwords are never
-    logged or stored."""
+    the account service decides who it is (services/accounts.py). Passwords are never logged or
+    stored in clear."""
     services = request.app[SERVICES]
     scheme, value = parse_authorization(request.headers.get("Authorization"))
     # What the game got from Ubisoft Connect (its platform ticket) says a lot about whether Connect
     # still works, e.g. with Ubisoft's servers unreachable. Log its shape only, never its content.
     log.info("login credentials: scheme=%s, ticket %s, app=%s", scheme or "(none)",
              f"{len(value)} chars" if value else "MISSING", request.headers.get("Ubi-AppId", "(none)"))
+    ip = client_ip(request)
+    if services.login_failures.blocked(ip):
+        log.warning("login from %s refused: too many failed sign-ins, try again in a few minutes", ip)
+        return auth_refused(request, "Too many failed sign-ins, try again in a few minutes")
     try:
-        session = services.accounts.login(LoginRequest(client_ip(request), scheme, value, dict(request.headers)))
+        session = services.accounts.login(LoginRequest(ip, scheme, value, dict(request.headers)))
     except AuthError as e:
-        return json_response(request, {"errorCode": 1, "message": str(e), "httpCode": 401}, "refused", 401)
+        if scheme.lower() == "basic":            # a password guess (tickets are not guessable)
+            services.login_failures.failed(ip)
+        log.warning("login from %s refused: %s", ip, e)
+        return auth_refused(request, "Invalid credentials")
+    if scheme.lower() == "basic":
+        services.login_failures.succeeded(ip)
     p = session.player
     app_id = request.headers.get("Ubi-AppId", "").lower()
     connect = bool(app_id) and app_id != APP_ID
@@ -60,7 +77,9 @@ async def create_session(request: web.Request) -> web.Response:
     if connect:
         # Ubisoft Connect (any other app id) keeps the remember-me ticket and signs in with it next time
         # (`rm_v1`), which we accept like any other credential.
-        body.update(spaceId=CONNECT_SPACE_ID, rememberMeTicket=ubi_shaped_ticket(app_id, session.session_id),
+        remember = ubi_shaped_ticket(app_id, session.session_id)
+        services.accounts.remember(session, remember)
+        body.update(spaceId=CONNECT_SPACE_ID, rememberMeTicket=remember,
                     codeGenerationPreference=None, maskedPhone=None)
     else:
         body.update(spaceId=SPACE_ID, rememberMeTicket=None)

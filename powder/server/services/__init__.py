@@ -1,6 +1,7 @@
 """Game logic. Transports, the admin CLI and plugins all go through a Services instance."""
 from __future__ import annotations
 
+import asyncio
 import io
 import json
 import logging
@@ -11,6 +12,7 @@ from pathlib import Path
 
 from ..config import Config
 from ..core.events import EventBus
+from ..core.ratelimit import FailureLimiter
 from ..core.sessions import SessionRegistry
 from ..db.database import Database
 from ..db.repos import Repos
@@ -29,6 +31,7 @@ log = logging.getLogger("powder")
 
 DB_NAME = "powder.db"
 LEGACY_DB_NAME = "steep.db"                    # before the rename to Powder
+MATCHMAKING_PUSH_DELAY_S = 0.3
 
 
 def move_legacy_db(data_dir: Path) -> Path:
@@ -136,7 +139,22 @@ class Services:
         self.economy = EconomyService(self.config, self.repos, self.assets.catalog, self.events)
         self.stats = StatsService(self.repos)
         self.entities = EntityService(self.repos)
-        self.matchmaking = MatchmakingService()
+        self.matchmaking = MatchmakingService(self._push_matchmaking)
+        self.login_failures = FailureLimiter()          # per client address: sign-ins and the account API
+
+    def _push_matchmaking(self, profile_id: str, code: int, params: dict) -> None:
+        """A matchmaking notification to a player's game over NEX. Sent a moment later, so it arrives
+        after the reply to the call that caused it (as with Ubisoft's server)."""
+        from ..transport.nex.rmc_codec import NOTIFICATION_METHOD, notification_event
+
+        def send():
+            if not self.sessions.push_nex(profile_id, "NotificationProtocol", NOTIFICATION_METHOD,
+                                          notification_event("Matchmaking", code, params), call_id=0):
+                log.warning("matchmaking: %s has no game connected, code %d not delivered", profile_id, code)
+        try:
+            asyncio.get_running_loop().call_later(MATCHMAKING_PUSH_DELAY_S, send)
+        except RuntimeError:                    # no event loop (admin CLI, tests): send now
+            send()
 
     def default_player_id(self) -> str:
         """Configured default, else the one stored (imported or created once) and kept. A database from
@@ -150,8 +168,8 @@ class Services:
             self.repos.kv.set("server", "default_player", pid)
         return pid
 
-    def seed(self, profile_id: str) -> None:
-        create_player(profile_id, config=self.config, repos=self.repos)
+    def seed(self, profile_id: str, name: str | None = None) -> None:
+        create_player(profile_id, config=self.config, repos=self.repos, name=name)
 
     def reset(self, profile_id: str) -> None:
         """Wipe a player; they start again as a new player on their next login."""

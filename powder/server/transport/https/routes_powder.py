@@ -2,7 +2,11 @@
 build on them. No authentication yet: they expose only player names and connection state, and the server
 is meant for a LAN/VPN of friends. Add auth before exposing a server to the internet.
 
-  GET /_powder/status   who is connected: Ubisoft Connect (demux) clients and game (NEX) sessions
+  GET /_powder/status   who is connected: Ubisoft Connect (demux) clients and game (NEX) sessions, and
+                        the caller's address as the server sees it ("you": a launcher finds its own PC)
+  GET /_powder/account/new        whether registering takes over the existing player
+  POST /_powder/account/register|login|email|password|name   accounts, for the launcher (JSON; each
+                        call carries email and password, failed ones are rate-limited per address)
   GET /_powder/ca.pem   the local CA certificate (public part), for clients that must trust it
   GET /_powder/overlay/powder.js   the Powder part of Ubisoft Connect's in-game overlay
 """
@@ -12,17 +16,26 @@ from aiohttp import web
 
 from ....version import __version__
 from ...builtin import connect_ui
+from ...services.accounts import AccountError, AuthError
 from .keys import CA_PEM, HOW, SERVICES
+from .routes_ubi import client_ip
+
+
+def _peer(nex) -> str:
+    addr = getattr(nex, "addr", None)
+    return f"{addr[0]}:{addr[1]}" if addr else ""
 
 
 async def status(request: web.Request) -> web.Response:
     services = request.app[SERVICES]
     connect = [{"player": c.player_name, "peer": c.peer, "services": sorted(set(c.channels.values()))}
                for c in services.connect_clients if c.profile_id]
-    game = [{"player": s.player.name, "nex": s.nex is not None}
+    game = [{"player": s.player.name, "nex": s.nex is not None, "peer": _peer(s.nex)}
             for s in services.sessions.by_player.values() if s.nex is not None]
     request[HOW] = "powder-status"
-    return web.json_response({"server": "powder", "version": __version__,
+    return web.json_response({"server": "powder", "version": __version__, "you": client_ip(request),
+                              "public_host": services.config.server.public_host,
+                              "accounts": services.accounts.required,
                               "players": len(services.repos.players.all()),
                               "gamedata": not services.assets.empty,
                               "connect": connect, "game": game})
@@ -44,7 +57,74 @@ async def overlay_part(request: web.Request) -> web.Response:
                         headers={"Access-Control-Allow-Origin": "*"})
 
 
+# ---- accounts (the launcher registers and manages them) ---------------------------------------
+# JSON bodies; every call that reads or changes an account carries its email and current password, so
+# the launcher needs no session of its own. Bodies are never logged (passwords).
+async def _account_call(request: web.Request, change) -> web.Response:
+    services = request.app[SERVICES]
+    ip = client_ip(request)
+    request[HOW] = "powder-account"
+    if services.login_failures.blocked(ip):
+        return web.json_response({"error": "Too many failed attempts, try again in a few minutes."}, status=429)
+    try:
+        body = await request.json()
+        if not isinstance(body, dict):
+            raise ValueError
+    except ValueError:
+        return web.json_response({"error": "bad request"}, status=400)
+    accounts = services.accounts
+    try:
+        if change is None:                                     # register
+            account = accounts.register(str(body.get("email", "")), str(body.get("password", "")),
+                                        str(body.get("name", "")))
+        else:
+            account = accounts.authenticate(str(body.get("email", "")), str(body.get("password", "")))
+            services.login_failures.succeeded(ip)
+            account = change(accounts, account, body) or account
+    except AuthError:
+        services.login_failures.failed(ip)
+        return web.json_response({"error": "Wrong email or password."}, status=401)
+    except AccountError as e:
+        return web.json_response({"error": str(e)}, status=400)
+    return web.json_response(accounts.info(account))
+
+
+async def account_register(request: web.Request) -> web.Response:
+    return await _account_call(request, None)
+
+
+async def account_login(request: web.Request) -> web.Response:
+    return await _account_call(request, lambda accounts, account, body: None)
+
+
+async def account_email(request: web.Request) -> web.Response:
+    return await _account_call(request, lambda accounts, account, body:
+                               accounts.change_email(account, str(body.get("new_email", ""))))
+
+
+async def account_password(request: web.Request) -> web.Response:
+    return await _account_call(request, lambda accounts, account, body:
+                               accounts.change_password(account, str(body.get("new_password", ""))))
+
+
+async def account_name(request: web.Request) -> web.Response:
+    return await _account_call(request, lambda accounts, account, body:
+                               accounts.rename(account, str(body.get("name", ""))))
+
+
+async def account_new(request: web.Request) -> web.Response:
+    """What registering would do here: take over an existing player (the first account on a server)."""
+    request[HOW] = "powder-account"
+    return web.json_response({"takes_over": request.app[SERVICES].accounts.claimable_player_name()})
+
+
 def add_routes(app: web.Application) -> None:
     app.router.add_get("/_powder/status", status)
+    app.router.add_get("/_powder/account/new", account_new)
+    app.router.add_post("/_powder/account/register", account_register)
+    app.router.add_post("/_powder/account/login", account_login)
+    app.router.add_post("/_powder/account/email", account_email)
+    app.router.add_post("/_powder/account/password", account_password)
+    app.router.add_post("/_powder/account/name", account_name)
     app.router.add_get("/_powder/ca.pem", ca_pem)
     app.router.add_get(connect_ui.POWDER_PART_PATH, overlay_part)

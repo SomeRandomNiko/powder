@@ -138,6 +138,7 @@ class NexServer(asyncio.DatagramProtocol):
         s = c.session
         if s is not None and getattr(s, "nex", None) is c:
             s.nex = None
+            self.services.matchmaking.on_disconnect(s.profile_id)   # the game is gone: out of its sessions
         log.info("%s:%d connection closed (%s)", c.addr[0], c.addr[1], why)
 
     async def run_timers(self) -> None:

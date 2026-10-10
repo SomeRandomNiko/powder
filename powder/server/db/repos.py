@@ -53,6 +53,13 @@ class PlayerRepo:
     def delete(self, profile_id: str) -> None:
         self.db.execute("DELETE FROM players WHERE profile_id = ?", (profile_id.lower(),))
 
+    def rename(self, profile_id: str, name: str) -> None:
+        self.db.execute("UPDATE players SET name = ? WHERE profile_id = ?", (name, profile_id.lower()))
+
+    def by_name(self, name: str) -> PlayerRow | None:
+        r = self.db.execute("SELECT profile_id FROM players WHERE name = ? COLLATE NOCASE", (name,)).fetchone()
+        return self.get(r["profile_id"]) if r else None
+
 
 class InventoryRepo:
     def __init__(self, db: Database):
@@ -239,6 +246,77 @@ class LedgerRepo:
             "SELECT * FROM ledger WHERE profile_id = ? ORDER BY id DESC LIMIT ?", (profile_id.lower(), limit))]
 
 
+@dataclass(frozen=True)
+class AccountRow:
+    account_id: str
+    email: str
+    password_hash: str
+    profile_id: str
+    created_at: str
+    updated_at: str
+
+
+class AccountsRepo:
+    def __init__(self, db: Database):
+        self.db = db
+
+    @staticmethod
+    def _row(r) -> AccountRow | None:
+        return AccountRow(r["account_id"], r["email"], r["password_hash"], r["profile_id"], r["created_at"],
+                          r["updated_at"]) if r else None
+
+    def get(self, account_id: str) -> AccountRow | None:
+        return self._row(self.db.execute("SELECT * FROM accounts WHERE account_id = ?",
+                                         (account_id.lower(),)).fetchone())
+
+    def by_email(self, email: str) -> AccountRow | None:
+        return self._row(self.db.execute("SELECT * FROM accounts WHERE email = ?", (email.strip(),)).fetchone())
+
+    def by_profile(self, profile_id: str) -> AccountRow | None:
+        return self._row(self.db.execute("SELECT * FROM accounts WHERE profile_id = ?",
+                                         (profile_id.lower(),)).fetchone())
+
+    def all(self) -> list[AccountRow]:
+        return [self._row(r) for r in self.db.execute("SELECT * FROM accounts ORDER BY created_at")]
+
+    def count(self) -> int:
+        return self.db.execute("SELECT COUNT(*) FROM accounts").fetchone()[0]
+
+    def create(self, account_id: str, email: str, password_hash: str, profile_id: str) -> AccountRow:
+        now = utc_now()
+        self.db.execute("INSERT INTO accounts(account_id, email, password_hash, profile_id, created_at, "
+                        "updated_at) VALUES (?,?,?,?,?,?)",
+                        (account_id.lower(), email.strip(), password_hash, profile_id.lower(), now, now))
+        return self.get(account_id)
+
+    def update(self, account_id: str, **fields) -> None:
+        """Change email, password_hash and/or profile_id."""
+        assert fields and set(fields) <= {"email", "password_hash", "profile_id"}, fields
+        sets = ", ".join(f"{k} = ?" for k in fields)
+        self.db.execute(f"UPDATE accounts SET {sets}, updated_at = ? WHERE account_id = ?",
+                        (*fields.values(), utc_now(), account_id.lower()))
+
+    def delete(self, account_id: str) -> None:
+        self.db.execute("DELETE FROM accounts WHERE account_id = ?", (account_id.lower(),))
+
+
+class RememberTicketsRepo:
+    def __init__(self, db: Database):
+        self.db = db
+
+    def add(self, ticket: str, account_id: str) -> None:
+        self.db.execute("INSERT OR REPLACE INTO remember_tickets(ticket, account_id, created_at) VALUES (?,?,?)",
+                        (ticket, account_id.lower(), utc_now()))
+
+    def account(self, ticket: str) -> str | None:
+        r = self.db.execute("SELECT account_id FROM remember_tickets WHERE ticket = ?", (ticket,)).fetchone()
+        return r["account_id"] if r else None
+
+    def revoke_all(self, account_id: str) -> int:
+        return self.db.execute("DELETE FROM remember_tickets WHERE account_id = ?",
+                               (account_id.lower(),)).rowcount
+
+
 class KvRepo:
     def __init__(self, db: Database):
         self.db = db
@@ -266,3 +344,5 @@ class Repos:
         self.challenge_scores = ChallengeScoresRepo(db)
         self.entities = EntitiesRepo(db)
         self.achievements = AchievementsRepo(db)
+        self.accounts = AccountsRepo(db)
+        self.remember_tickets = RememberTicketsRepo(db)

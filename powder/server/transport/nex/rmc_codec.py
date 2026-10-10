@@ -16,6 +16,7 @@ the game shows DE-005-03 (found by live trace, 2026-10-04).
 from __future__ import annotations
 
 import datetime
+import json
 import struct
 import uuid
 from dataclasses import dataclass
@@ -160,6 +161,27 @@ def write_variant(w: Writer, t: int, value) -> Writer:
     if t == V_NONE:
         return w
     raise ValueError(f"unknown Variant type {t}")
+
+
+def read_variant_map(r: Reader) -> dict[str, object]:
+    """Map<String, Variant> -> {name: value} (types dropped)."""
+    return {r.string(): read_variant(r)[1] for _ in range(r.u32())}
+
+
+def read_strings(r: Reader) -> list[str]:
+    return [r.string() for _ in range(r.u32())]
+
+
+NOTIFICATION_METHOD = "NotificationProtocol::ProcessNotificationEvent_V1"
+
+
+def notification_event(facility: str, code: int, params: dict) -> bytes:
+    """Params of a server-pushed NotificationProtocol::ProcessNotificationEvent_V1 (call id 0), as Ubisoft's
+    server sent them: type map {NotificationEvent: 1}, 14 zero bytes, u16 2, String JSON
+    {"code", "params", "facility"} (Python's default json.dumps spacing). The meaning of the zero bytes
+    and the 2 is unknown; they are copied as recorded."""
+    text = json.dumps({"code": code, "params": params, "facility": facility})
+    return (Writer().u32(1).string("NotificationEvent").u16(1).raw(bytes(14)).u16(2).string(text).bytes())
 
 
 def quazal_datetime(t: datetime.datetime) -> int:

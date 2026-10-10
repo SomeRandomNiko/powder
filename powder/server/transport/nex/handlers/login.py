@@ -1,12 +1,20 @@
 """LoginProtocol: the first two NEX calls of every session."""
 from __future__ import annotations
 
+import ipaddress
 import logging
 
 from ..errors import RmcError
 from ..rmc_codec import Reader, Writer, read_type_map
 
 log = logging.getLogger("powder.rmc")
+
+
+def is_loopback(host: str) -> bool:
+    try:
+        return ipaddress.ip_address(host).is_loopback
+    except ValueError:
+        return host == "localhost"
 
 
 async def login_with_token(ctx, r: Reader) -> bytes:
@@ -29,10 +37,15 @@ async def login_with_token(ctx, r: Reader) -> bytes:
 def register(ctx, r: Reader) -> bytes:
     """params: type map (empty), List<String> = the client's own station URLs (one per NIC).
     outputs (reader FUN_7ff661b5c020): u32 connection id, String public URL = the client's address as
-    this server sees it (other keys, e.g. sid, kept from its first URL)."""
+    this server sees it (other keys, e.g. sid, kept from its first URL). The game on the server's own PC
+    connects from 127.0.0.1, which other players can't reach: it gets public_host instead (it goes into
+    the station URLs the game hands to other players for peer-to-peer)."""
     read_type_map(r)
     urls = [r.string() for _ in range(r.u32())]
     host, port = ctx.conn.addr
+    public_host = ctx.services.config.server.public_host
+    if is_loopback(host) and not is_loopback(public_host):
+        host = public_host
     keys = {"address": host, "port": str(port)}
     if urls and ":/" in urls[0]:
         for kv in urls[0].split(":/", 1)[1].split(";"):

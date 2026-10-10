@@ -13,6 +13,12 @@
   powder-server admin reset [PLAYER]                start over as a new player
   powder-server admin offers TEXT
   powder-server admin trust (status|install|remove)   local CA in Windows' trusted roots (Ubisoft Connect)
+  powder-server admin accounts                      accounts (players register in the launcher)
+  powder-server admin account-email EMAIL NEW_EMAIL
+  powder-server admin account-password EMAIL        set a new password (asks for it)
+  powder-server admin account-rename EMAIL NAME
+  powder-server admin account-link EMAIL PLAYER     the account owns that existing player instead
+  powder-server admin account-delete EMAIL          the player and its progress stay
 PLAYER defaults to the configured default player.
 """
 from __future__ import annotations
@@ -66,6 +72,57 @@ def add_parser(sub) -> None:
     q.add_argument("text")
     q = a.add_parser("trust", help="the local CA in Windows' trusted roots (needed by Ubisoft Connect)")
     q.add_argument("action", choices=("status", "install", "remove"))
+    a.add_parser("accounts", help="list accounts (email -> player)")
+    q = a.add_parser("account-email", help="change an account's email")
+    q.add_argument("email")
+    q.add_argument("new_email")
+    q = a.add_parser("account-password", help="set a new password (for a player who forgot theirs)")
+    q.add_argument("email")
+    q = a.add_parser("account-rename", help="rename an account's player")
+    q.add_argument("email")
+    q.add_argument("name")
+    q = a.add_parser("account-link", help="let an account own another existing player")
+    q.add_argument("email")
+    q.add_argument("player")
+    q = a.add_parser("account-delete", help="delete an account (its player and progress stay)")
+    q.add_argument("email")
+
+
+def accounts(args, s: Services) -> int:
+    """The account commands (the host's way out when someone forgets a password)."""
+    from ..services.accounts import AccountError
+    if args.admin_cmd == "accounts":
+        for acc in s.repos.accounts.all():
+            p = s.repos.players.get(acc.profile_id)
+            print(f"{acc.email:32s} {p.name if p else '?':16s} {acc.profile_id}  since {acc.created_at}")
+        if not s.accounts.required:
+            print("no accounts: every sign-in is accepted until the first player registers in the launcher")
+        return 0
+    account = s.repos.accounts.by_email(args.email)
+    if account is None:
+        print(f"no account with the email {args.email}")
+        return 1
+    try:
+        if args.admin_cmd == "account-email":
+            s.accounts.change_email(account, args.new_email)
+        elif args.admin_cmd == "account-password":
+            import getpass
+            password = getpass.getpass("new password: ")
+            if password != getpass.getpass("again: "):
+                print("the passwords differ")
+                return 1
+            s.accounts.change_password(account, password)
+        elif args.admin_cmd == "account-rename":
+            s.accounts.rename(account, args.name)
+        elif args.admin_cmd == "account-link":
+            s.accounts.link(account, args.player)
+        elif args.admin_cmd == "account-delete":
+            s.accounts.delete(account)
+    except AccountError as e:
+        print(e)
+        return 1
+    print("done")
+    return 0
 
 
 def _grant_args(args) -> None:
@@ -98,6 +155,11 @@ def run(args, config: Config) -> int:
     if args.admin_cmd == "trust":
         return trust(args.action, config)
     s = Services.open(config)
+    if args.admin_cmd.startswith("account"):
+        try:
+            return accounts(args, s)
+        finally:
+            s.db.close()
     pid = (getattr(args, "player", None) if args.admin_cmd != "import" else None) or s.default_player_id()
     pid = pid.lower()
     cmd = args.admin_cmd

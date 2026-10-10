@@ -13,7 +13,9 @@ Routes match on the path only; the host matters only for the pack.
 from __future__ import annotations
 
 import datetime
+import json
 import logging
+import re
 from pathlib import Path
 
 from aiohttp import web
@@ -128,8 +130,28 @@ async def fallback(request: web.Request) -> web.Response:
         return web.Response(body=b"{}", headers={"Content-Type": routes_ubi.JSON})
     fixture, tier = hit
     request[HOW] = f"gamedata:{tier}"
-    return web.Response(body=fixture.body, status=fixture.status,
-                        headers={"Content-Type": fixture.content_type})
+    body = fixture.body
+    if request.app[SERVICES].config.multiplayer.storm == "off" and APP_CONFIG.fullmatch(request.path):
+        body = without_storm(body)
+    return web.Response(body=body, status=fixture.status, headers={"Content-Type": fixture.content_type})
+
+
+APP_CONFIG = re.compile(r"/v\d+/applications/[0-9a-fA-F-]{36}/configuration")
+
+
+def without_storm(body: bytes) -> bytes:
+    """The application configuration without peer-to-peer (Storm) servers: a recorded one names Ubisoft's
+    NAT detection and traversal hosts ("storm", "punch"), which the game would otherwise try to reach."""
+    try:
+        data = json.loads(body)
+        cfg = data.get("configuration", data)
+    except (ValueError, AttributeError):
+        return body
+    if not isinstance(cfg, dict) or not ({"storm", "punch"} & set(cfg)):
+        return body
+    cfg["storm"] = {}
+    cfg.pop("punch", None)
+    return json.dumps(data).encode()
 
 
 def build_app(services, plugins=None, *, nex_public_key: str = "") -> web.Application:

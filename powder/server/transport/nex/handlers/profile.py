@@ -1,5 +1,5 @@
-"""NEX calls answered without recordings: per-player profiles, leaderboards (local players only, for now
-empty) and matchmaking acknowledgements. Formats from the replies of the real server."""
+"""NEX calls answered without recordings: per-player profiles and leaderboards (local players only, for
+now empty). Formats from the replies of the real server."""
 from __future__ import annotations
 
 import uuid
@@ -30,18 +30,10 @@ def leaderboard(ctx, r: Reader) -> bytes:
     return Writer().u32(0).u32(0).bytes()
 
 
-def acknowledge(ctx, r: Reader) -> bytes:
-    """Matchmaking calls whose reply has no outputs."""
-    return b""
-
-
 HANDLERS = {
     "ClansProtocol::GetPlayerProfile_V1": clans_player_profile,
     "PlayerStatusProtocol::GetProfile_V1": player_status_profile,
     "SteepTournamentProtocol::FetchPlayerProfileInfo_V1": tournament_player_info,
     "PlayerStats2Protocol::GetLeaderboard_V1": leaderboard,
     "PlayerStats2Protocol::GetLeaderboardForPopulations_V1": leaderboard,
-    **{f"MatchmakingProtocol::{m}_V1": acknowledge for m in (
-        "CancelAllTicket", "JoinSession", "LeaveSession", "MigrateHost", "ReportConnectionFailure",
-        "ReportHostSuccess", "ReportJoinSuccess", "UpdateSession", "UpdateTicket")},
 }

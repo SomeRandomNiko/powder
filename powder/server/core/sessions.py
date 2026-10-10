@@ -47,6 +47,7 @@ class PlayerSession:
     ticket: str
     session_id: str
     client_ip: str
+    connect: bool = False                               # Ubisoft Connect's session (not the game's)
     created: float = field(default_factory=time.time)
     expires: float = field(default_factory=lambda: time.time() + SESSION_TTL_S)
     websockets: set = field(default_factory=set)        # WsChannel
@@ -67,7 +68,8 @@ class SessionRegistry:
     def issue(self, player: Player, client_ip: str, app_id: str = "") -> PlayerSession:
         session_id = str(uuid.uuid4())
         s = PlayerSession(player, ticket=ubi_shaped_ticket(app_id, session_id) if app_id else
-                          "powder." + secrets.token_urlsafe(48), session_id=session_id, client_ip=client_ip)
+                          "powder." + secrets.token_urlsafe(48), session_id=session_id, client_ip=client_ip,
+                          connect=bool(app_id))
         old = self.by_player.get(player.profile_id)
         if old:                                  # keep live channels across a re-login
             s.websockets, s.nex = old.websockets, old.nex
@@ -76,6 +78,23 @@ class SessionRegistry:
         self.by_player[player.profile_id] = s
         self._expire()
         return s
+
+    def latest_from(self, client_ip: str, connect_only: bool = False) -> PlayerSession | None:
+        """The most recent live session from this address (Ubisoft Connect's only, if asked): the game and
+        Ubisoft Connect run on the same PC, so a game login without a ticket of ours belongs to the player
+        Connect signed in as there."""
+        now = time.time()
+        found = [s for s in self.by_ticket.values() if s.client_ip == client_ip and s.expires > now
+                 and (s.connect or not connect_only)]
+        return max(found, key=lambda s: s.created, default=None)
+
+    def drop_player(self, profile_id: str) -> None:
+        """Forget every session of a player (password changed, account deleted)."""
+        for t, s in list(self.by_ticket.items()):
+            if s.profile_id == profile_id:
+                self.by_ticket.pop(t, None)
+                self.by_session_id.pop(s.session_id, None)
+        self.by_player.pop(profile_id, None)
 
     def by_token(self, ticket: str) -> PlayerSession | None:
         s = self.by_ticket.get(ticket)

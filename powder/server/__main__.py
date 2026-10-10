@@ -24,14 +24,20 @@ def main(argv: list[str] | None = None) -> int:
     run = sub.add_parser("run", help="run the server")
     run.add_argument("--no-gamedata", action="store_true",
                      help="ignore the game-data pack (as if none were installed)")
+    run.add_argument("--bind", help="listen on this address instead of [server] bind (0.0.0.0: all networks)")
+    run.add_argument("--public-host", help="the address other PCs reach this server at, instead of "
+                                           "[server] public_host")
     admin_cli.add_parser(sub)
     gamedata_cli.add_parser(sub)
     args = parser.parse_args(argv)
     config = Config.load(args.config)
 
     if args.cmd == "run":
+        overrides = {k: v for k, v in (("bind", args.bind), ("public_host", args.public_host)) if v}
         if args.no_gamedata:
-            config = dataclasses.replace(config, server=dataclasses.replace(config.server, use_gamedata=False))
+            overrides["use_gamedata"] = False
+        if overrides:
+            config = dataclasses.replace(config, server=dataclasses.replace(config.server, **overrides))
         from . import app
         app.main(config)
         return 0

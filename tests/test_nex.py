@@ -126,8 +126,8 @@ async def test_full_session(services, player, nex):
     _, rows = decode_stat_group((await client.read()).body)
     assert next(r for r in rows if r.key == "level_stat:6:infinite").value[0] == 41
 
-    # a call answered from the recordings ("uniform": always the same empty reply)
-    client.call("MatchmakingProtocol", 7, "MatchmakingProtocol::LeaveSession_V1", b"\x01\x00\x00\x00")
+    # a matchmaking call (empty reply)
+    client.call("MatchmakingProtocol", 7, "MatchmakingProtocol::LeaveSession_V1", rmc.Writer().u32(0).u32(1).bytes())
     assert (await client.read()).success
 
     # unknown call -> RMC error, connection survives

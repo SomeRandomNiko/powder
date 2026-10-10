@@ -46,6 +46,13 @@ class PlayersConfig:
 
 
 @dataclass(frozen=True)
+class MultiplayerConfig:
+    storm: str = "off"                  # "off": the game gets no peer-to-peer (Storm) servers, also not the
+                                        # pack's (Ubisoft's NAT detection/traversal hosts); players on one
+                                        # LAN reach each other directly. "pack": the pack's settings as recorded
+
+
+@dataclass(frozen=True)
 class PluginsConfig:
     enabled: tuple[str, ...] = ("*",)   # plugin file stems, "*" = all
     disabled: tuple[str, ...] = ()
@@ -56,6 +63,7 @@ class Config:
     server: ServerConfig = ServerConfig()
     players: PlayersConfig = PlayersConfig()
     plugins: PluginsConfig = PluginsConfig()
+    multiplayer: MultiplayerConfig = MultiplayerConfig()
     gameplay: Toggles = Toggles()
     gameplay_per_player: dict[str, dict] = field(default_factory=dict)
     path: Path | None = None            # the file this was loaded from
@@ -95,12 +103,16 @@ class Config:
         plugins = PluginsConfig(enabled=tuple(plugins_raw.get("enabled", ("*",))),
                                 disabled=tuple(plugins_raw.get("disabled", ())))
 
+        multiplayer = _build(MultiplayerConfig, raw.get("multiplayer", {}))
+        if multiplayer.storm not in ("off", "pack"):
+            raise ValueError(f'[multiplayer] storm must be "off" or "pack", not {multiplayer.storm!r}')
+
         gameplay_raw = dict(raw.get("gameplay", {}))
         per_player = gameplay_raw.pop("player", {})
         gameplay = _build(Toggles, gameplay_raw)
         for pid, over in per_player.items():
             _check_keys(Toggles, over, f"gameplay.player.{pid}")
-        return cls(server=srv, players=players, plugins=plugins, gameplay=gameplay,
+        return cls(server=srv, players=players, plugins=plugins, multiplayer=multiplayer, gameplay=gameplay,
                    gameplay_per_player=per_player, path=path)
 
 
