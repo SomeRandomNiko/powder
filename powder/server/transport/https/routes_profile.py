@@ -6,6 +6,7 @@ the server (services/friends.py).
 from __future__ import annotations
 
 import datetime
+import json
 import logging
 import uuid
 
@@ -303,6 +304,40 @@ async def profile_connections(request: web.Request) -> web.Response:
         for pid in wanted if pid in playing]}, "connections")
 
 
+async def _json_body(request: web.Request) -> dict:
+    try:
+        body = await request.json()
+    except ValueError:
+        body = None
+    return body if isinstance(body, dict) else {}
+
+
+async def channels_mine(request: web.Request) -> web.Response:
+    """Ubisoft Connect's chat channels (services/channels.py), which also carry game invites."""
+    found = _services(request).channels.of(_me(request) or "", request.query.get("spaceId"))
+    return json_response(request, {"channels": found, "nextToken": ""}, "channels")
+
+
+async def channel_create(request: web.Request) -> web.Response:
+    body = await _json_body(request)
+    log.info("channel create request from %s: %s", _me(request), json.dumps(body)[:2000])
+    data = _services(request).channels.create(_me(request) or "", request.match_info["space"], body)
+    return json_response(request, data, "channel-created")
+
+
+async def channel_messages(request: web.Request) -> web.Response:
+    channels, cid = _services(request).channels, request.match_info["channel"]
+    if request.method == "POST":
+        body = await _json_body(request)
+        log.info("channel %s message from %s: %s", cid, _me(request), json.dumps(body)[:2000])
+        message = channels.post(_me(request) or "", cid, body)
+        if message is None:
+            return web.json_response({"errorCode": 1, "message": "no such channel"}, status=404)
+        return json_response(request, message, "channel-message")
+    found = channels.messages(_me(request) or "", cid)
+    return json_response(request, {"messages": found or [], "nextToken": ""}, "channel-messages")
+
+
 async def club_title(request: web.Request) -> web.Response:
     pid = _pid(request)
     return json_response(request, {
@@ -363,7 +398,9 @@ def add_routes(app: web.Application) -> None:
     r.add_get(f"/v1/profiles/{pid}/statsCard", _ok({"Statscards": []}, "stats-card"))
     r.add_get(f"/v2/profiles/{pid}/news", _ok({"pagination": {"total": 0, "count": 0, "offset": 0, "limit": 20},
                                                 "news": []}, "news"))
-    r.add_get("/v1/profiles/me/channels", _ok({"channels": [], "nextToken": ""}, "channels"))
+    r.add_get("/v1/profiles/me/channels", channels_mine)
+    r.add_post("/v1/spaces/{space}/channels", channel_create)
+    r.add_route("*", "/v1/spaces/{space}/channels/{channel}/messages", channel_messages)
     r.add_get("/v1/profiles/me/global/ubiconnect/entitlement/api/entitlements", _ok({"entitlements": []}, "entitlements"))
     r.add_get(f"/v1/profiles/{pid}/richpresences/subscriptions", _ok({}, "richpresence"))
     r.add_get(f"/v1/profiles/{pid}/global/ubiconnect/challenges/api", _ok({"challenges": []}, "connect-challenges"))

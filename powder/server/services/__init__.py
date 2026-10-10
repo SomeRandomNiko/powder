@@ -21,6 +21,7 @@ from ..fixtures.http import HttpFixtures
 from ..fixtures.rmc import RmcFixtures
 from ..gamedata import pack
 from .accounts import AccountService
+from .channels import ChannelService
 from .economy import EconomyService
 from .entities import EntityService
 from .matchmaking import MatchmakingService
@@ -140,6 +141,7 @@ class Services:
         self.stats = StatsService(self.repos)
         self.entities = EntityService(self.repos)
         self.matchmaking = MatchmakingService(self._push_matchmaking)
+        self.channels = ChannelService(self._push_ws)
         self.login_failures = FailureLimiter()          # per client address: sign-ins and the account API
 
     def _push_matchmaking(self, profile_id: str, code: int, params: dict) -> None:
@@ -155,6 +157,16 @@ class Services:
             asyncio.get_running_loop().call_later(MATCHMAKING_PUSH_DELAY_S, send)
         except RuntimeError:                    # no event loop (admin CLI, tests): send now
             send()
+
+    def _push_ws(self, profile_id: str, notification_type: str, content: dict) -> None:
+        """A UbiServices notification over the player's websocket(s) (Ubisoft Connect's and the game's)."""
+        async def send():
+            if not await self.sessions.push_ws(profile_id, notification_type, content):
+                log.info("%s: %s has no websocket open, not delivered", notification_type, profile_id)
+        try:
+            asyncio.get_running_loop().create_task(send())
+        except RuntimeError:                    # no event loop (admin CLI): nobody to tell
+            pass
 
     def default_player_id(self) -> str:
         """Configured default, else the one stored (imported or created once) and kept. A database from
