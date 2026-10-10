@@ -3,8 +3,8 @@
 The game and Ubisoft Connect fetch their SDK configuration at start. It switches the SDK's features on
 (a feature missing from `featuresSwitches` is off: with none, the game stops right after its login) and
 tells it where each service lives (`gatewayResources`: URL templates on the hostnames Powder redirects).
-This one is written for Powder: the features and services the game uses, default timeouts, no
-peer-to-peer (storm) servers, no CDN links. Connect gets the same minus the game's features.
+This one is written for Powder: the features and services the game uses, default timeouts, no CDN
+links; the peer-to-peer (storm) servers are filled in per server (https/app.py storm_config). Connect gets the same minus the game's features.
 """
 from __future__ import annotations
 

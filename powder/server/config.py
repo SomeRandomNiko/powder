@@ -13,6 +13,7 @@ class ServerConfig:
     public_host: str = "127.0.0.1"      # address the game uses to reach us (NEX StationURLs)
     https_port: int = 443
     nex_port: int = 6005
+    storm_port: int = 11000             # Storm (UDP): NAT detection on this port to +3, traversal on +5
     crl_port: int = 80                  # plain HTTP: the local CA's revocation list Ubisoft Connect checks
     connect_cloud_saves: bool = False   # False: tell Ubisoft Connect the games have no cloud saves, so it
                                         # never tries (and fails) to sync them at launch and exit
@@ -47,9 +48,9 @@ class PlayersConfig:
 
 @dataclass(frozen=True)
 class MultiplayerConfig:
-    storm: str = "pack"                 # "pack": the pack's peer-to-peer (Storm) settings as recorded (Ubisoft's
-                                        # NAT detection/traversal hosts). "off": none, also not the pack's; the
-                                        # game then switches multiplayer off (never asks for a match)
+    storm: str = "powder"               # "powder": this server is the games' peer-to-peer helper (Storm: NAT
+                                        # detection and traversal, transport/storm.py). "off": none (not even
+                                        # a pack's Ubisoft hosts); the game then switches multiplayer off
 
 
 @dataclass(frozen=True)
@@ -104,8 +105,10 @@ class Config:
                                 disabled=tuple(plugins_raw.get("disabled", ())))
 
         multiplayer = _build(MultiplayerConfig, raw.get("multiplayer", {}))
-        if multiplayer.storm not in ("off", "pack"):
-            raise ValueError(f'[multiplayer] storm must be "off" or "pack", not {multiplayer.storm!r}')
+        if multiplayer.storm == "pack":                     # before Powder had its own: now the same
+            multiplayer = dataclasses.replace(multiplayer, storm="powder")
+        if multiplayer.storm not in ("off", "powder"):
+            raise ValueError(f'[multiplayer] storm must be "powder" or "off", not {multiplayer.storm!r}')
 
         gameplay_raw = dict(raw.get("gameplay", {}))
         per_player = gameplay_raw.pop("player", {})

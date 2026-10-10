@@ -68,7 +68,8 @@ async def test_game_sdk_configuration_switches_its_features_on(client):
     urls = {g["name"]: g["url"] for g in config["gatewayResources"]}
     assert urls["configs/events"] == "https://msr-{env}public-ubiservices.ubi.com/{version}/spaces/{spaceId}/configs/events"
     assert urls["websocket/notifications"].startswith("wss://{env}public-ws-ubiservices.ubi.com")
-    assert config["platformConfig"]["applicationId"] == APP_ID and config["storm"] == {}
+    assert config["platformConfig"]["applicationId"] == APP_ID
+    assert config["storm"]["traversalUrl"] == "127.0.0.1:11005" == config["punch"]["traversalUrl"]   # Powder's
     r = await client.get(f"/v1/applications/{CONNECT_APP_ID}/configuration", headers=UBI)
     assert (await r.json())["configuration"]["platformConfig"]["uplayGameCode"] == "AVA"
     r = await client.get("/v1/applications/00000000-0000-0000-0000-000000000000/configuration", headers=UBI)

@@ -6,6 +6,7 @@ bind = "127.0.0.1"          # this PC only. For friends on the local network: "0
 public_host = "127.0.0.1"   # address the games use to reach this server (this PC's LAN address for friends)
 https_port = 443           # HTTPS for the game and Ubisoft Connect, incl. Connect's demux (routed by hostname)
 nex_port = 6005
+storm_port = 11000          # peer-to-peer helpers (UDP): NAT detection 11000-11003, traversal 11005
 crl_port = 80               # revocation list for the local CA (http://public-ubiservices.ubi.com/powder-ca.crl)
 connect_cloud_saves = false # false: Ubisoft Connect treats games as having no cloud saves (no sync prompts)
 data_dir = "data"           # database, logs, uploaded game logs, generated TLS cert + NEX signing key
@@ -25,8 +26,8 @@ strict_tickets = false      # true: refuse requests with tickets the server did 
 # "192.168.1.20" = "<profile id>"
 
 [multiplayer]
-storm = "pack"              # "pack": the game-data pack's peer-to-peer (Storm) settings as recorded
-                            # (Ubisoft's hosts); "off": none, and the game then switches multiplayer off
+storm = "powder"            # "powder": this server is the games' peer-to-peer helper (Storm: NAT detection
+                            # and traversal, on storm_port); "off": none, and the game switches multiplayer off
 
 [gameplay]
 unlimited_heli_tickets = false   # (planned)

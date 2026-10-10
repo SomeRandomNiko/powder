@@ -123,34 +123,53 @@ async def fallback(request: web.Request) -> web.Response:
         built = builtin_http.lookup(request.method, request.path, request.query)
         if built is not None:                           # no pack (or not in it): the server's own reply
             request[HOW] = "builtin"
-            return web.Response(body=builtin_http.body(built), headers={"Content-Type": routes_ubi.JSON})
+            body = storm_config(request, builtin_http.body(built))
+            return web.Response(body=body, headers={"Content-Type": routes_ubi.JSON})
         request[HOW] = "UNMATCHED"
         if cached_ui:
             return web.Response(status=503, body=b"{}", headers={"Content-Type": routes_ubi.JSON})
         return web.Response(body=b"{}", headers={"Content-Type": routes_ubi.JSON})
     fixture, tier = hit
     request[HOW] = f"gamedata:{tier}"
-    body = fixture.body
-    if request.app[SERVICES].config.multiplayer.storm == "off" and APP_CONFIG.fullmatch(request.path):
-        body = without_storm(body)
+    body = storm_config(request, fixture.body)
     return web.Response(body=body, status=fixture.status, headers={"Content-Type": fixture.content_type})
 
 
-APP_CONFIG = re.compile(r"/v\d+/applications/[0-9a-fA-F-]{36}/configuration")
+GAME_CONFIG = re.compile(rf"/v\d+/applications/{APP_ID}/configuration", re.IGNORECASE)
 
 
-def without_storm(body: bytes) -> bytes:
-    """The application configuration without peer-to-peer (Storm) servers: a recorded one names Ubisoft's
-    NAT detection and traversal hosts ("storm", "punch"), which the game would otherwise try to reach."""
+def storm_config(request: web.Request, body: bytes) -> bytes:
+    """The game's SDK configuration names its peer-to-peer helpers (Storm, transport/storm.py): this server,
+    whether the reply comes from the pack (recorded: Ubisoft's hosts) or is the built-in one."""
+    if not GAME_CONFIG.fullmatch(request.path):
+        return body
+    cfg = request.app[SERVICES].config
+    return with_storm(body, storm_settings(cfg.server) if cfg.multiplayer.storm == "powder" else None)
+
+
+def storm_settings(server) -> dict:
+    """Where the games reach Storm: the address they reach the game server at (an address, not a hostname, so
+    no hosts entries are needed; on the hosting PC its network address, as the others see it)."""
+    host, port = server.public_host, server.storm_port
+    return {"detectUrl1": f"{host}:{port}", "detectUrl2": f"{host}:{port + 2}",
+            "traversalUrl": f"{host}:{port + 5}",
+            "routerProvisioningUrl": "https://public-ubiservices.ubi.com/v1/storm/router"}   # relay: never asked
+
+
+def with_storm(body: bytes, settings: dict | None) -> bytes:
+    """The configuration with these Storm settings ("storm" and "punch"); None: none (multiplayer off)."""
     try:
         data = json.loads(body)
-        cfg = data.get("configuration", data)
+        cfg = data.get("configuration")
     except (ValueError, AttributeError):
         return body
-    if not isinstance(cfg, dict) or not ({"storm", "punch"} & set(cfg)):
+    if not isinstance(cfg, dict):                       # not an SDK configuration
         return body
-    cfg["storm"] = {}
-    cfg.pop("punch", None)
+    cfg["storm"] = dict(settings or {})
+    if settings:
+        cfg["punch"] = dict(settings)
+    else:
+        cfg.pop("punch", None)
     return json.dumps(data).encode()
 
 

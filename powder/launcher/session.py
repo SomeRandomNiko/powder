@@ -423,9 +423,12 @@ class Session:
             return False
         self.pack_changed = False
         if st is None and self.cfg.server_mode == "local":
-            srv = self.server_config().server
+            settings = self.server_config()
+            srv = settings.server
             needed = [ports.Port(srv.https_port, "TCP", "HTTPS"), ports.Port(srv.crl_port, "TCP", "certificate list"),
                       ports.Port(srv.nex_port, "UDP", "game server")]
+            if settings.multiplayer.storm == "powder":
+                needed += [ports.Port(srv.storm_port + o, "UDP", "peer-to-peer helper") for o in (0, 1, 2, 3, 5)]
             while taken := ports.busy("0.0.0.0" if host_for else srv.bind, needed):
                 self.ask("server", "The local server cannot start: " + "; ".join(taken) + ". Close that program "
                          "(or change the port in config.toml), then check again.", ["Check again"])

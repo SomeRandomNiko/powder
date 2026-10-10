@@ -295,11 +295,3 @@ def test_register_from_the_servers_own_pc_gives_its_lan_address(services):
         ctx = SimpleNamespace(services=services, conn=SimpleNamespace(addr=peer, pid=7))
         r = rmc.Reader(register(ctx, rmc.Reader(params)))
         assert r.u32() == 7 and r.string() == f"prudp:/address={expected};port=9103;sid=15"
-
-
-def test_storm_off_removes_the_recorded_p2p_servers():
-    from powder.server.transport.https.app import without_storm
-    recorded = {"configuration": {"storm": {"detectUrl1": "detect.example.invalid:11000"},
-                                  "punch": {"traversalUrl": "traversal.example.invalid:11005"}, "other": 1}}
-    assert json.loads(without_storm(json.dumps(recorded).encode())) == {"configuration": {"storm": {}, "other": 1}}
-    assert without_storm(b'{"recorded": true}') == b'{"recorded": true}'

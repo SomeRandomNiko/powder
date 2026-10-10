@@ -265,17 +265,21 @@ Installed, Powder's folder is `%LOCALAPPDATA%\Powder`; from source, the current 
 | 443  | TCP      | HTTPS for the game and Ubisoft Connect, and Connect's demux (one listener, routed by hostname) |
 | 6005 | UDP      | Quazal NEX (the game's online session)                                                         |
 | 80   | TCP      | the local CA's revocation list (`http://public-ubiservices.ubi.com/powder-ca.crl`)             |
+| 11000-11003, 11005 | UDP | Storm, the games' peer-to-peer helpers: NAT detection (11000-11003) and traversal (11005) |
 
-All three are set in `config.toml`. By default the server only listens on this PC (`bind = "127.0.0.1"`).
+All of them are set in `config.toml` (`storm_port` is the first of the Storm ports). By default the server only listens on this PC (`bind = "127.0.0.1"`).
 To host for the local network, choose **Host for others** in the launcher: it starts the server with
 `--bind 0.0.0.0 --public-host <this PC's address>` and adds the firewall rule. Without the launcher, set
 `bind = "0.0.0.0"` and `public_host` in `config.toml` and allow the server in Windows Firewall yourself.
 
 The players' games also talk to each other directly (UDP, peer-to-peer, ports the game picks). On a
 local network that needs nothing but the firewall rule for Steep. The game only starts its multiplayer
-part when its configuration names peer-to-peer helper servers (Storm: NAT detection and traversal);
-for now they come from the game-data pack (`[multiplayer] storm = "pack"`, the default: Ubisoft's hosts
-as recorded), so multiplayer needs a pack. Powder does not provide those servers itself yet.
+part when its configuration names peer-to-peer helper servers (Storm), and it finds the other players'
+games through them: NAT detection tells a game the address the server sees, and the traversal server
+passes a game's "connect me to that player" on to the other game, so both send to each other at once
+(hole punching). Powder runs both itself (`powder/server/transport/storm.py`, as recorded from
+Ubisoft's) and tells the game they are at the server's address (`[multiplayer] storm = "powder"`, the
+default; `"off"` switches the game's multiplayer off). No game-data pack is needed for it.
 
 ## Progression
 

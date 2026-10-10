@@ -13,7 +13,7 @@ from . import tls
 from .config import Config
 from .plugins.loader import PluginManager
 from .services import Services
-from .transport import tls_router
+from .transport import storm, tls_router
 from .transport.demux import server as demux_server
 from .transport.https import app as https_app
 from .transport.https.keys import CA_PEM
@@ -68,9 +68,19 @@ async def run(config: Config) -> None:
     nex, transport = await nex_server.start(services, dispatcher, signing_key, cfg.bind, cfg.public_host,
                                             cfg.nex_port)
     log.info("NEX listening on udp %s:%d (game reaches it at %s)", cfg.bind, cfg.nex_port, cfg.public_host)
+    storm_transports = []
+    if config.multiplayer.storm == "powder":
+        try:
+            _, storm_transports = await storm.start(cfg.bind, cfg.storm_port)
+            log.info("Storm (peer-to-peer helpers) on udp %s:%d-%d", cfg.bind, cfg.storm_port, cfg.storm_port + 5)
+        except OSError as e:
+            log.warning("cannot start Storm on udp %s:%d-%d (%s): multiplayer will not find other players",
+                        cfg.bind, cfg.storm_port, cfg.storm_port + 5, e)
     try:
         await nex.run_timers()
     finally:
+        for t in storm_transports:
+            t.close()
         transport.close()
         listener.close()
         await runner.cleanup()
