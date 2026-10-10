@@ -181,6 +181,11 @@ class ChallengeScoresRepo:
         return [dict(r) for r in self.db.execute(
             "SELECT * FROM challenge_scores WHERE profile_id = ? ORDER BY challenge_id", (profile_id.lower(),))]
 
+    def for_challenge(self, challenge_id: str) -> list[dict]:
+        """Every player's best on one challenge (for its leaderboard)."""
+        return [dict(r) for r in self.db.execute(
+            "SELECT * FROM challenge_scores WHERE challenge_id = ?", (challenge_id,))]
+
 
 class EntitiesRepo:
     """Rows <-> UbiServices entity dicts (entityId, profileId, spaceId, type, editable, name, tags,
