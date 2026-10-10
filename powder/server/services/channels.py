@@ -4,10 +4,14 @@ When Steep invites a friend, Ubisoft Connect gets (or creates) the direct-messag
 and posts a GAME_INVITE message into it; the friend's Connect learns about both through its notification
 websocket (upc_channel_created, upc_channel_message_created) and hands an accepted invite to its game.
 
-Layout from Connect's own UI code (no recordings): a channel has id, type (DM / GROUP), memberships
-[{profileId, membershipType ACTIVE / PENDING, addedBy}], lastMessage, lastMessageTime, unreadCount; a
-message id, channelId, authorId, type (GAME_INVITE, TEXT_MESSAGE, ...), createTime. What Connect sends
-when creating them is logged, and every field it sends is kept in what it gets back.
+What Connect sends (seen live):
+  create   POST /v1/spaces/{space}/channels {"channel": {"type": "DM"}, "members": [friend's profile id]}
+  invite   POST .../channels/{id}/messages {"type": "GAME_INVITE", "textMessage": base64 JSON {multiplayerId,
+           gameSessionId (the inviter's group session on the game server), isJoinable, productName, userName,
+           spaceId, ...}}
+What it gets back, from Connect's own UI code (no recordings): a channel has id, type (DM / GROUP),
+memberships [{profileId, membershipType ACTIVE / PENDING, addedBy}], lastMessage, lastMessageTime,
+unreadCount; a message id, channelId, authorId, type, createTime (plus what Connect sent).
 
 In memory: channels last until the server stops (invites are only useful while both are playing).
 """
@@ -51,13 +55,14 @@ class ChannelService:
     def create(self, profile_id: str, space_id: str, body: dict) -> dict:
         """POST /v1/spaces/{space}/channels: an existing DM with the same members is returned instead."""
         me = profile_id.lower()
-        wanted = {me} | {p.lower() for p in _profile_ids(body)}
-        ctype = body.get("type") or (DM if len(wanted) == 2 else GROUP)
+        wanted = {me} | {p.lower() for p in body.get("members") or [] if isinstance(p, str)}
+        requested = body.get("channel") if isinstance(body.get("channel"), dict) else {}
+        ctype = requested.get("type") or (DM if len(wanted) == 2 else GROUP)
         for c in self.channels.values():
             if c.data.get("type") == DM and ctype == DM and set(c.members) == wanted:
                 return c.data
         now = iso_now()
-        data = {**body, "id": str(uuid.uuid4()), "type": ctype, "spaceId": space_id,
+        data = {**requested, "id": str(uuid.uuid4()), "type": ctype, "spaceId": space_id,
                 "memberships": [{"profileId": p, "membershipType": "ACTIVE", "addedBy": me, "joinTime": now}
                                 for p in [me, *sorted(wanted - {me})]],
                 "createTime": now, "updateTime": now, "lastMessage": None, "lastMessageTime": now, "unreadCount": 0}
@@ -91,16 +96,3 @@ class ChannelService:
             return None
         return channel.messages
 
-
-def _profile_ids(body: dict) -> list[str]:
-    """The other members named in a create request, wherever Connect puts them."""
-    out = []
-    for key in ("profileIds", "memberIds", "members", "memberships", "invitees", "participants"):
-        for v in body.get(key) or []:
-            pid = v.get("profileId") if isinstance(v, dict) else v
-            if isinstance(pid, str):
-                out.append(pid)
-    for key in ("profileId", "friendProfileId", "recipientId"):
-        if isinstance(body.get(key), str):
-            out.append(body[key])
-    return out
