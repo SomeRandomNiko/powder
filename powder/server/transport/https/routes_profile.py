@@ -51,7 +51,9 @@ def _for_player(build, how):
 
 
 async def space_entities(request: web.Request) -> web.Response:
-    """Game-wide entities: none. Player-made trail challenges are not kept. The world's matchmaking map
+    """Game-wide entities: none. Ubisoft's featured trails (TITLE_CHALLENGE "Specials" with rewards, asked
+    for with tags=TRAIL,ACTIVATED,OUTOFCLUSTER; the last ones ended in 2019) are not served; the players'
+    own trails are profile entities (FAVORITE_CHALLENGE / FAVORITE_REPLAY). The world's matchmaking map
     (TITLE_MATCHMAKING_MAP) stays empty on purpose: with no entity the game matchmakes without a map
     (MatchmakingCellsService goes on), while an entity whose map file it can't download switches its
     matchmaking off for RETRY_MATCHMAKING_MAP_DOWNLOAD_SECONDS (30 min). The map files are not ours."""

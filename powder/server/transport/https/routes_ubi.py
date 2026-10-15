@@ -207,11 +207,12 @@ async def get_profile_entities(request: web.Request) -> web.StreamResponse:
 
 
 async def get_entities_batch(request: web.Request) -> web.StreamResponse:
-    """GET /v2/profiles/entities?profileIds=a,b&type=PROFILE (rider cards of friends and self)."""
+    """GET /v2/profiles/entities?profileIds=a,b&type=PROFILE (rider cards of friends and self), also
+    with tags (the friends' trails: type=FAVORITE_CHALLENGE&tags=TRAIL,WORLD_<id>,SANDBOX_A)."""
     q = request.query
     ids = [p for p in q.get("profileIds", "").split(",") if p]
-    items = request.app[SERVICES].entities.for_profiles(ids, q.get("type"), _int(q, "offset", 0),
-                                                         _int(q, "limit", 100))
+    items = request.app[SERVICES].entities.for_profiles(ids, q.get("type"), q.get("tags"),
+                                                         _int(q, "offset", 0), _int(q, "limit", 100))
     return json_response(request, {"entities": [_storage(request, e) for e in items]}, f"entities({len(items)})")
 
 

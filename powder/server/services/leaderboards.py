@@ -5,6 +5,8 @@ The game names a board "public_challenge_<ascending|descending>[_ranked]_ldb:<ch
 GetLeaderboardForPopulations) or for a range of ranks (GetLeaderboard, e.g. rank 1 = the record).
 Ascending: lower is better (times); descending: higher is better (points). Each player's best is kept
 (services/stats.py), with when it was set, so a weekly or daily board shows the bests set in that period.
+A row's associated_replay is the best's ghost on ranked boards: the game races the record holder's
+ghost and, finishing a ranked run that beats a record, uploads its own (OnlineTrailService).
 """
 from __future__ import annotations
 
@@ -65,8 +67,16 @@ def board(repos, name: str, now: datetime.datetime | None = None) -> Board:
     for i, s in enumerate(scores, 1):
         if s["best_score"] != previous:                 # equal scores share a rank
             rank, previous = i, s["best_score"]
-        rows.append(Row(s["profile_id"], rank, float(s["best_score"]), s.get("replay") or "none"))
+        rows.append(Row(s["profile_id"], rank, float(s["best_score"]), _ghost(repos, s.get("replay"))))
     return Board(len(rows), rows)
+
+
+def _ghost(repos, replay: str | None) -> str:
+    """A best's ghost (BEST_GHOST_* entity id), "none" once the game has deleted that entity: it
+    replaces its ghost entities and would otherwise try to download a missing one."""
+    if not replay or replay == "none" or repos.entities.get(replay) is None:
+        return "none"
+    return replay
 
 
 def for_players(repos, name: str, profile_ids: list[str]) -> Board:

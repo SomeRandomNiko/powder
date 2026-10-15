@@ -100,6 +100,22 @@ def test_challenge_personal_best(services, player):
     assert best == {"C_descending": 300, "C_ascending": 30}
 
 
+def test_ranked_challenge_best_keeps_its_ghost(services, player):
+    """A ranked result names the ghost the game made of the run; a worse run (no ghost) keeps the best's."""
+    def score(value, replay):
+        services.stats.apply_events(player, [ev("ascending_public_challenge_ranked_score_event",
+                                                challenge_id_to_use=(V_STRING, "C_ranked"),
+                                                replay=(V_STRING, replay), score=(V_STRING, str(value)))])
+    score(61, "none")
+    score(58, "ghost-1")
+    score(70, "none")
+    score(58, "ghost-2")                         # the same time again, with a new ghost of it
+    (best,) = services.repos.challenge_scores.all(player)
+    assert (best["best_score"], best["replay"]) == (58, "ghost-2")
+    score(58, "none")
+    assert services.repos.challenge_scores.all(player)[0]["replay"] == "ghost-2"
+
+
 def test_existing_phase1_database_is_migrated(tmp_path):
     path = tmp_path / "data" / "powder.db"
     db = Database(path)

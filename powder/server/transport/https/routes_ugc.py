@@ -1,5 +1,6 @@
-"""Steep's UGC service (steep-prod-pc.steep.olympus.ubi.com/ugc/v1): player-made content such as photos
-(typeId 2) and trails (replays, the ghosts of challenges). Kept for the server's players, files in data/ugc/.
+"""Steep's UGC service (steep-prod-pc.steep.olympus.ubi.com/ugc/v1): player-made content; the game uses it
+for photos (typeId 2). Kept for the server's players, files in data/ugc/. (Trails, saved replays and
+challenge ghosts are profile entities with a file instead, see routes_ubi.py.)
 
 From recordings of Ubisoft's service: a list (GET /ugc/v1/?algo=Steep&type_id=&world_id=&profile_id=...)
 of items {id, typeId, worldId, profileId, pubDate, metadata, likeCounter, downloadCounter, liked, tags,

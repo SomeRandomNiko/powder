@@ -1,8 +1,12 @@
-"""Steep's UGC service (photos, trails): created, uploaded, listed, liked, downloaded. Made-up content."""
+"""Steep's UGC service (photos, trails) and the entities with files (saved replays, friends' trails,
+ranked ghosts): created, uploaded, listed, liked, downloaded. Made-up content."""
 import pytest
 from aiohttp.test_utils import TestClient, TestServer
 
+from powder.server.services import leaderboards
+from powder.server.services.stats import StatEvent
 from powder.server.transport.https.app import build_app
+from powder.server.transport.nex.rmc_codec import V_STRING
 
 OLYMPUS = {"Host": "steep-prod-pc.steep.olympus.ubi.com"}
 WORLD = 1146631465444
@@ -72,6 +76,40 @@ async def test_a_saved_replay_gets_its_file_stored(client, services):
     assert await (await client.get(path, headers=ubi)).read() == b"REPLAYDATA"
     await client.delete(f"/v2/profiles/entities/{created['entityId']}", headers=ubi)
     assert (await client.get(path, headers=ubi)).status == 404
+
+
+async def test_a_ranked_ghost_is_offered_on_the_leaderboard(client, services, player):
+    """A ranked run's ghost (a BEST_GHOST_* entity with its file) is the best's associated_replay,
+    which other players download; once the game deletes the entity the board says "none" again."""
+    ubi = {"Host": "public-ubiservices.ubi.com"}
+    body = {"type": "BEST_GHOST_CHALLENGE_PUBLIC_ALLTIME", "name": "ScimitarEntity",
+            "tags": ["TRAIL", "WORLD_10af88fa9e4", "SANDBOX_A", "BEST_GHOST"],
+            "obj": {"leaderboard": "public_challenge_ascending_ranked_ldb", "challenge": "Steep_A09",
+                    "score": 58250}, "extendedStorage": {"provider": "s3", "fileExtension": ""}}
+    ghost = await (await client.post(f"/v2/profiles/{player}/entities", headers=ubi, json=body)).json()
+    path = ghost["extendedStorage"]["putUrl"].split(".com", 1)[1]
+    assert (await client.put(path, data=b"GHOST", headers=ubi)).status == 200
+    services.stats.apply_events(player, [StatEvent("ascending_public_challenge_ranked_score_event", {
+        "challenge_id_to_use": (V_STRING, "Steep_A09"), "replay": (V_STRING, ghost["entityId"]),
+        "score": (V_STRING, "58250")})])
+    board = "public_challenge_ascending_ranked_ldb:Steep_A09:infinite"
+    (row,) = leaderboards.ranks(services.repos, board, 1, 1).rows
+    assert row.replay == ghost["entityId"]
+    read = await (await client.get(f"/v2/profiles/entities/{row.replay}", headers=ubi)).json()
+    assert await (await client.get(read["extendedStorage"]["getUrl"].split(".com", 1)[1], headers=ubi)).read() == b"GHOST"
+    await client.delete(f"/v2/profiles/entities/{ghost['entityId']}", headers=ubi)
+    assert leaderboards.ranks(services.repos, board, 1, 1).rows[0].replay == "none"
+
+
+async def test_friends_trails_by_world(client, services, player):
+    """The friends' trails come in one request for several players, filtered by the world's tags."""
+    ubi = {"Host": "public-ubiservices.ubi.com"}
+    for world in ("WORLD_10af88fa9e4", "WORLD_7a954c6bd0"):
+        services.entities.create({"type": "FAVORITE_CHALLENGE", "tags": ["TRAIL", world, "SANDBOX_A"],
+                                  "obj": {"world": world}}, player)
+    q = f"profileIds={player}&type=FAVORITE_CHALLENGE&tags=TRAIL,WORLD_7a954c6bd0,SANDBOX_A"
+    found = (await (await client.get(f"/v2/profiles/entities?{q}", headers=ubi)).json())["entities"]
+    assert [e["obj"]["world"] for e in found] == ["WORLD_7a954c6bd0"]
 
 
 async def test_only_the_owner_hides_or_deletes(client, services):

@@ -85,9 +85,14 @@ EVENT_RULES: dict[str, tuple[str, str, str]] = {
     "unlock_exploration": ("unlockable_exploration:{type_id}:{mapping_id}:infinite", OR, "bitfield"),
     "unlock_challenge": ("unlockable_challenge:{mapping_id}:infinite", OR, "bitfield"),
 }
-# challenge results feed leaderboards, not player_profile: kept as a personal best per challenge
+# challenge results feed leaderboards, not player_profile: kept as a personal best per challenge.
+# Only ranked challenges have ghosts (as on Ubisoft's servers): their result comes with the id of the
+# BEST_GHOST_* entity the game made of the run, or "none" when it made none (the run beat no record).
 SCORE_EVENTS = {"descending_public_challenge_score_event": "descending",   # higher is better
-                "ascending_public_challenge_score_event": "ascending"}     # lower is better
+                "ascending_public_challenge_score_event": "ascending",     # lower is better
+                "descending_public_challenge_ranked_score_event": "descending",
+                "ascending_public_challenge_ranked_score_event": "ascending"}
+NO_REPLAY = "none"
 
 
 class StatsService:
@@ -197,7 +202,9 @@ class StatsService:
             return
         direction = SCORE_EVENTS[ev.name]
         best = self.repos.challenge_scores.get(profile_id, challenge)
+        replay = f.get("replay") or NO_REPLAY
         better = (best is None or (score > best["best_score"] if direction == "descending"
                                    else score < best["best_score"]))
-        if better:
-            self.repos.challenge_scores.set(profile_id, challenge, direction, score, f.get("replay"))
+        ghost_of_best = best is not None and score == best["best_score"] and replay != NO_REPLAY
+        if better or ghost_of_best:
+            self.repos.challenge_scores.set(profile_id, challenge, direction, score, replay)

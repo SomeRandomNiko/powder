@@ -32,11 +32,13 @@ class EntityService:
             items = [e for e in items if want <= set(e.get("tags") or ())]
         return items[offset:offset + limit]
 
-    def for_profiles(self, profile_ids: list[str], type_: str | None = None,
+    def for_profiles(self, profile_ids: list[str], type_: str | None = None, tags: str | None = None,
                      offset: int = 0, limit: int = 100) -> list[dict]:
+        """Several players' entities at once, e.g. the friends' trails (FAVORITE_REPLAY /
+        FAVORITE_CHALLENGE, tags TRAIL,WORLD_<id>,SANDBOX_A) or rider cards."""
         out = []
         for pid in profile_ids:
-            out.extend(self.for_profile(pid, type_, limit=10_000))
+            out.extend(self.for_profile(pid, type_, tags, limit=10_000))
         return out[offset:offset + limit]
 
     def get(self, entity_id: str) -> dict | None:

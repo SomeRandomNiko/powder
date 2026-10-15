@@ -55,8 +55,8 @@ What Steep needs a server for, and how far Powder covers it.
 | Feature                           | Status | Notes                                                                       |
 | --------------------------------- | ------ | --------------------------------------------------------------------------- |
 | Leaderboards (challenge rankings) | ✅     | The server's players, by their best score; weekly and daily boards show the bests set in that period |
-| Replays / ghosts of other players | 🟡     | Saved and shared rides, photos (likes, deleting) are kept and seen by the other players; challenge ghosts: the game never creates one yet |
-| Player-made trails / challenges   | ❌     | Always an empty list                                                        |
+| Replays / ghosts of other players | 🟡     | Saved and shared rides, photos (likes, deleting) are kept and seen by the other players. Ghosts: only ranked challenges have them (as on Ubisoft's servers); a ranked run that beats a record uploads its ghost, and the others race the record holder's. Not yet tried in the game |
+| Player-made trails / challenges   | 🟡     | Your own saved trails and challenges are kept; the other players' are offered per world (not yet tried in the game). Ubisoft's own featured trails ("Specials", the last ones ended in 2019) are not served |
 | Seasons and tournaments           | 🟡     | No season running, as on Ubisoft's servers at the end; nothing changes      |
 
 ### Playing with others
