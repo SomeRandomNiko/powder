@@ -194,6 +194,8 @@ async def entity_file(request: web.Request) -> web.StreamResponse:
         return web.Response(status=204)
     if not path.exists():
         return web.Response(status=404)
+    if request.method == "GET":                 # the access log skips /_powder/ paths
+        log.info("entity file %s downloaded by %s", entity_id, _owner(request) or "?")
     return web.FileResponse(path, headers={"Content-Type": "application/octet-stream"})
 
 
