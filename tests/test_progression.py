@@ -116,6 +116,15 @@ def test_ranked_challenge_best_keeps_its_ghost(services, player):
     assert services.repos.challenge_scores.all(player)[0]["replay"] == "ghost-2"
 
 
+def test_player_made_challenge_best(services, player):
+    """A player-made challenge (id "<creator>_<savename>") has its own score event."""
+    made = f"{player}_CheckpointRaceChallenge_101526215553"
+    for v in (25807, 24100, 26000):
+        services.stats.apply_events(player, [ev("ascending_challenge_score_event", challenge_id_to_use=(V_STRING, made),
+                                                replay=(V_STRING, "none"), score=(V_STRING, str(v)))])
+    assert [(s["challenge_id"], s["best_score"]) for s in services.repos.challenge_scores.all(player)] == [(made, 24100)]
+
+
 def test_existing_phase1_database_is_migrated(tmp_path):
     path = tmp_path / "data" / "powder.db"
     db = Database(path)

@@ -3,6 +3,7 @@
 The game names a board "public_challenge_<ascending|descending>[_ranked]_ldb:<challenge id>:<period>"
 (period infinite, weekly or daily) and asks either for some players (its own player and friends,
 GetLeaderboardForPopulations) or for a range of ranks (GetLeaderboard, e.g. rank 1 = the record).
+A player-made challenge's board has no "public_" ("challenge_ascending_ldb:<creator>_<savename>:infinite").
 Ascending: lower is better (times); descending: higher is better (points). Each player's best is kept
 (services/stats.py), with when it was set, so a weekly or daily board shows the bests set in that period.
 A row's associated_replay is the best's ghost on ranked boards: the game races the record holder's
@@ -14,7 +15,7 @@ import datetime
 import re
 from dataclasses import dataclass
 
-BOARD = re.compile(r"^public_challenge_(ascending|descending)(?:_ranked)?_ldb:(.+):(infinite|weekly|daily)$")
+BOARD = re.compile(r"^(?:public_)?challenge_(ascending|descending)(?:_ranked)?_ldb:(.+):(infinite|weekly|daily)$")
 
 
 @dataclass(frozen=True)

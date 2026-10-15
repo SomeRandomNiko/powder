@@ -28,6 +28,9 @@ def test_ranks_by_direction_with_ties():
     week = leaderboards.board(r, "public_challenge_descending_ldb:Steep_A03:weekly", NOW)
     assert [x.profile_id for x in week.rows] == [A, C]                 # B's best is from last week
     assert leaderboards.board(r, "something_else", NOW).total == 0
+    made = leaderboards.board(r, "challenge_descending_ldb:Steep_A03:infinite", NOW)    # a player-made one's
+    assert made.total == 3
+    assert leaderboards.board(r, "tournament_challenge_descending_ldb:Steep_A03:infinite", NOW).total == 0
 
 
 def test_population_request_and_reply_as_recorded():

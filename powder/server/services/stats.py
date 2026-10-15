@@ -88,10 +88,10 @@ EVENT_RULES: dict[str, tuple[str, str, str]] = {
 # challenge results feed leaderboards, not player_profile: kept as a personal best per challenge.
 # Only ranked challenges have ghosts (as on Ubisoft's servers): their result comes with the id of the
 # BEST_GHOST_* entity the game made of the run, or "none" when it made none (the run beat no record).
-SCORE_EVENTS = {"descending_public_challenge_score_event": "descending",   # higher is better
-                "ascending_public_challenge_score_event": "ascending",     # lower is better
-                "descending_public_challenge_ranked_score_event": "descending",
-                "ascending_public_challenge_ranked_score_event": "ascending"}
+# Player-made challenges (id "<creator profile>_<savename>") have their own: *_challenge_score_event.
+SCORE_EVENTS = {f"{direction}_{kind}_score_event": direction       # descending: higher is better
+                for direction in ("descending", "ascending")
+                for kind in ("public_challenge", "public_challenge_ranked", "challenge", "challenge_ranked")}
 NO_REPLAY = "none"
 
 
